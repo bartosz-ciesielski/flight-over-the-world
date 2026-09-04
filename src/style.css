@@ -355,8 +355,36 @@ kbd {
   overflow-y: auto;
 }
 
-.lobby-carousel #lobby-carousel-canvas {
+.lobby-carousel {
+  justify-content: center;
+}
+
+#lobby-carousel-canvas {
+  flex: 1;
+  min-width: 0;
+  display: block;
   height: 200px;
+  border-radius: 8px;
+  background:
+    radial-gradient(ellipse at 50% 70%, rgba(216, 162, 74, 0.1), transparent 60%),
+    rgba(243, 234, 214, 0.03);
+}
+
+#lobby-car-prev, #lobby-car-next {
+  flex: 0 0 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 1px solid rgba(243, 234, 214, 0.25);
+  background: rgba(243, 234, 214, 0.06);
+  color: var(--paper);
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+#lobby-car-prev:hover, #lobby-car-next:hover {
+  background: rgba(216, 162, 74, 0.25);
+  transform: scale(1.08);
 }
 
 #lobby-mode-desc {
@@ -525,6 +553,7 @@ kbd {
 .carousel {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 10px;
   margin-bottom: 6px;
 }

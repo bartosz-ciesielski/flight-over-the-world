@@ -278,7 +278,6 @@ const el = {
   lobbyStart: document.getElementById("lobby-start"),
   lobbyStatus: document.getElementById("lobby-status"),
   lobbyScopes: document.getElementById("lobby-scopes"),
-  lobbySub: document.getElementById("lobby-sub"),
   lobbyModeDesc: document.getElementById("lobby-mode-desc"),
   lobbyCity: document.getElementById("lobby-city"),
   lobbyCarCanvas: document.getElementById("lobby-carousel-canvas"),
@@ -427,18 +426,11 @@ function playerRow(name, ready, planeKey) {
   return `<div class="player-row${ready ? " ready" : ""}"><div class="p-meta"><span>${name}</span><span class="p-plane">${plane}</span></div><span class="p-ready">${ready ? "GOTOWY" : "CZEKA"}</span></div>`;
 }
 
-const LOBBY_SUBS = {
-  guess: "Minuta lotu, potem mapa — kto bliżej, wygrywa",
-  home: "Host wpisuje adres domu — oboje startujecie ~30 km stąd",
-  free: "Host wybiera miasto startowe — lecicie razem",
-};
-
 function applyLobbySetup() {
   document.querySelectorAll("#lobby .mode-card").forEach((b) =>
     b.classList.toggle("selected", b.dataset.mode === mode)
   );
   el.lobbyModeDesc.textContent = MODE_DESCS[mode] || "";
-  el.lobbySub.textContent = LOBBY_SUBS[mode] || "Wybierz tryb i samolot";
   el.lobbyScopes.style.display = mode === "guess" ? "flex" : "none";
   el.lobbyCity.style.display = mode === "guess" ? "none" : "block";
   el.lobbyCity.placeholder = MODE_PLACEHOLDERS[mode] || "";
