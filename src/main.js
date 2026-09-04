@@ -667,7 +667,22 @@ function handleNetData(data, fromId) {
   } else if (data.t === "pose") {
     const id = data.from;
     if (!id || id === mp.myId) return;
-    mp.poses.set(id, data);
+    const prev = mp.poses.get(id);
+    mp.poses.set(id, {
+      lat: data.lat,
+      lon: data.lon,
+      h: data.h,
+      heading: data.heading,
+      pitch: data.pitch,
+      roll: data.roll,
+      plane: data.plane,
+      showLat: prev?.showLat ?? data.lat,
+      showLon: prev?.showLon ?? data.lon,
+      showH: prev?.showH ?? data.h,
+      showHeading: prev?.showHeading ?? data.heading,
+      showPitch: prev?.showPitch ?? data.pitch,
+      showRoll: prev?.showRoll ?? data.roll,
+    });
     if (data.plane) loadMate(id, data.plane);
   } else if (data.t === "guess") {
     const id = data.from;
@@ -870,6 +885,13 @@ function buildSeats() {
     if (!p.waiting) seats[p.id] = i++;
   }
   return seats;
+}
+
+function lerpAngle(a, b, t) {
+  let d = b - a;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  return a + d * t;
 }
 
 function offsetByIndex(lat, lon, index, total) {
@@ -1724,7 +1746,7 @@ function animate() {
 
   if (mp.active && mp.inRound && !menuOpen && !guessOpen && !crashed) {
     const now = performance.now();
-    if (now - mp.lastPoseAt > 100) {
+    if (now - mp.lastPoseAt > 50) {
       mp.lastPoseAt = now;
       mp.net?.send({
         t: "pose",
@@ -1741,16 +1763,23 @@ function animate() {
   }
   if (mp.active && mp.inRound && !menuOpen) {
     const deg = Math.PI / 180;
+    const follow = 1 - Math.exp(-14 * dt);
     for (const [id, pose] of mp.poses) {
       const mate = mp.mates.get(id);
       if (!mate?.mesh) continue;
+      pose.showLat += (pose.lat - pose.showLat) * follow;
+      pose.showLon += (pose.lon - pose.showLon) * follow;
+      pose.showH += (pose.h - pose.showH) * follow;
+      pose.showHeading = lerpAngle(pose.showHeading, pose.heading, follow);
+      pose.showPitch += (pose.pitch - pose.showPitch) * follow;
+      pose.showRoll += (pose.roll - pose.showRoll) * follow;
       const mm = frameAt(
-        pose.lat * deg,
-        pose.lon * deg,
-        pose.h,
-        pose.heading,
-        pose.pitch,
-        -pose.roll
+        pose.showLat * deg,
+        pose.showLon * deg,
+        pose.showH,
+        pose.showHeading,
+        pose.showPitch,
+        -pose.showRoll
       );
       mm.decompose(matePos, mateQuat, mate.mesh.scale);
       mate.mesh.position.copy(matePos);
