@@ -437,6 +437,8 @@ kbd {
   gap: 8px;
   margin: 4px 0 18px;
   text-align: left;
+  max-height: 220px;
+  overflow-y: auto;
 }
 
 .player-row {
@@ -736,6 +738,50 @@ kbd {
 #f-timer-box.show, #f-dist-box.show { display: flex; }
 
 #f-timer.low { color: #ff9d7a; }
+
+#mp-wait {
+  position: fixed;
+  inset: 0;
+  z-index: 11;
+  display: grid;
+  place-items: center;
+  background: rgba(10, 14, 10, 0.72);
+  backdrop-filter: blur(8px);
+}
+
+#mp-wait.hidden { display: none; }
+
+.mp-wait-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  padding: 28px 36px;
+  background: rgba(18, 14, 10, 0.85);
+  border: 1px solid rgba(243, 234, 214, 0.16);
+  border-radius: 10px;
+}
+
+#mp-wait-text {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--gold);
+  text-align: center;
+}
+
+.spin {
+  width: 38px;
+  height: 38px;
+  border: 3px solid rgba(243, 234, 214, 0.18);
+  border-top-color: var(--gold);
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
 
 /* --- mapa zgadywania --- */
 

@@ -236,6 +236,9 @@ const mp = {
   truth: null,
   lastPoseAt: 0,
   poseSeq: 0,
+  snapInfo: new Map(),
+  rematch: new Set(),
+  launching: false,
 };
 
 const ctrl = { roll: 0, pitch: 0, throttle: 0 };
@@ -274,6 +277,8 @@ const el = {
   gmClose: document.getElementById("gm-close"),
   gmRetry: document.getElementById("gm-retry"),
   gmSub: document.getElementById("gm-sub"),
+  mpWait: document.getElementById("mp-wait"),
+  mpWaitText: document.getElementById("mp-wait-text"),
   guessScope: document.getElementById("guess-scope"),
   landing: document.getElementById("landing"),
   lobby: document.getElementById("lobby"),
@@ -652,12 +657,17 @@ function handleNetData(data, fromId) {
     renderLobby();
     tryStartMp();
   } else if (data.t === "snapped") {
-    if (mp.host && data.from) {
+    if (data.from) {
+      mp.snapInfo.set(data.from, { h: data.h, heading: data.heading ?? 0 });
       mp.snapped.add(data.from);
-      tryReleaseGo();
     }
+    if (mp.host) tryReleaseGo();
   } else if (data.t === "go") {
-    releaseGo();
+    applyGo(data);
+  } else if (data.t === "rematch") {
+    if (data.from) mp.rematch.add(data.from);
+    updateRematchWait();
+    if (mp.host) tryLaunchRematch();
   } else if (data.t === "start") {
     if (data.seats && mp.myId && !data.seats[mp.myId]) {
       mp.roundActive = true;
@@ -680,10 +690,20 @@ function handleNetData(data, fromId) {
   } else if (data.t === "done") {
     const id = data.from;
     if (id && mp.players.has(id)) mp.players.get(id).inRound = false;
-    if (mp.host) checkRoundClear();
+    if (mp.host) {
+      if (mp.rematch.size) abortRematchToLobby();
+      else checkRoundClear();
+    }
     renderLobby();
   } else if (data.t === "roundEnd") {
+    const waitingRematch = mp.rematch.has(mp.myId) || !el.mpWait.classList.contains("hidden");
     finishRoomRound();
+    hideMpWait();
+    if (waitingRematch || guessOpen) {
+      el.guessmap.classList.remove("show");
+      guessOpen = false;
+      showLobby();
+    }
     renderLobby();
   }
 }
@@ -747,6 +767,10 @@ function closeRoom() {
   mp.guesses.clear();
   mp.poses.clear();
   mp.seats = {};
+  mp.snapInfo.clear();
+  mp.rematch.clear();
+  mp.launching = false;
+  hideMpWait();
   disposeAllMates();
 }
 
@@ -810,7 +834,10 @@ function tryStartMp() {
 }
 
 async function launchMpRound() {
+  if (mp.launching) return;
+  mp.launching = true;
   el.lobbyStart.disabled = true;
+  showMpWait(mode === "guess" ? "Losuję nowy punkt…" : "Przygotowuję lot…");
   try {
     if (mode === "guess") {
       const scope = GUESS_SCOPES[guessScope];
@@ -823,6 +850,8 @@ async function launchMpRound() {
     } else if (mode === "home") {
       const addr = el.lobbyCity.value.trim();
       if (!addr) {
+        mp.launching = false;
+        hideMpWait();
         setLobbyStatus("Wpisz adres domu", true);
         el.lobbyStart.disabled = false;
         return;
@@ -830,6 +859,8 @@ async function launchMpRound() {
       setLobbyStatus("Szukam adresu…");
       const loc = await geocodeCity(addr);
       if (!loc) {
+        mp.launching = false;
+        hideMpWait();
         setLobbyStatus("Nie znaleziono takiego adresu", true);
         el.lobbyStart.disabled = false;
         return;
@@ -851,6 +882,8 @@ async function launchMpRound() {
       setLobbyStatus(`Szukam: ${city}…`);
       const loc = await geocodeCity(city);
       if (!loc) {
+        mp.launching = false;
+        hideMpWait();
         setLobbyStatus(`Nie znaleziono miejscowości „${city}"`, true);
         el.lobbyStart.disabled = false;
         return;
@@ -860,6 +893,8 @@ async function launchMpRound() {
       startMpFlight(msg);
     }
   } catch {
+    mp.launching = false;
+    hideMpWait();
     setLobbyStatus("Błąd — sprawdź sieć i spróbuj ponownie", true);
     el.lobbyStart.disabled = false;
   }
@@ -911,7 +946,7 @@ function pushMatePose(id, data) {
 
 function offsetByIndex(lat, lon, index, total) {
   if (total <= 1) return { lat, lon };
-  const spacingM = 20;
+  const spacingM = 12;
   const dE = (index - (total - 1) / 2) * spacingM;
   const R = 6378137;
   return {
@@ -941,14 +976,25 @@ async function startMpFlight(msg) {
   mp.truth = { lat: msg.lat, lon: msg.lon };
   mp.seats = msg.seats || {};
   mp.snapped = new Set();
+  mp.snapInfo.clear();
+  mp.rematch.clear();
   mp.goSent = false;
   mp.waitingGo = false;
+  mp.launching = false;
   markRoundStarted(mp.seats);
   homeTarget = msg.homeLat != null ? { lat: msg.homeLat, lon: msg.homeLon } : null;
   timeLeft = mode === "guess" ? GUESS_TIME : mode === "home" ? HOME_TIME : 0;
   timerActive = false;
+  menuOpen = true;
+  guessOpen = false;
+  crashed = false;
+  finished = false;
+  el.guessmap.classList.remove("show");
+  el.lobby.classList.add("hidden");
+  hideBanner();
   el.lobbyStart.disabled = false;
   setLobbyStatus("Ładowanie terenu… czekam na wszystkich");
+  showMpWait("Ładowanie terenu… czekam na wszystkich");
   if (mode === "guess" && !geoCache) {
     GUESS_SCOPES[guessScope].load().then((g) => { geoCache = g; }).catch(() => {});
   }
@@ -964,7 +1010,7 @@ async function startMpFlight(msg) {
   if (mp.host) {
     broadcastRoster();
     setTimeout(() => {
-      if (mp.host && mp.roundActive && !mp.goSent) releaseGo();
+      if (mp.host && mp.roundActive && !mp.goSent) applyGo();
     }, 10000);
   }
 }
@@ -973,7 +1019,10 @@ function reportSnapped() {
   if (!mp.active || !mp.inRound || mp.goSent || mp.waitingGo) return;
   mp.waitingGo = true;
   setLobbyStatus("Czekam aż wszyscy będą gotowi…");
-  mp.net?.send({ t: "snapped", from: mp.myId });
+  showMpWait("Czekam aż wszyscy będą gotowi…");
+  const info = { h: plane.height, heading: 0 };
+  mp.snapInfo.set(mp.myId, info);
+  mp.net?.send({ t: "snapped", from: mp.myId, ...info });
   if (mp.host) {
     mp.snapped.add(mp.myId);
     tryReleaseGo();
@@ -983,14 +1032,36 @@ function reportSnapped() {
 function tryReleaseGo() {
   if (!mp.host || mp.goSent) return;
   const need = Object.keys(mp.seats || {});
-  if (need.length && need.every((id) => mp.snapped.has(id))) releaseGo();
+  if (need.length && need.every((id) => mp.snapped.has(id))) applyGo();
 }
 
-function releaseGo() {
+function buildGoPayload() {
+  const heights = [...mp.snapInfo.values()].map((s) => s.h).filter((h) => Number.isFinite(h));
+  const h = heights.length
+    ? heights.slice().sort((a, b) => a - b)[Math.floor(heights.length / 2)]
+    : plane?.height;
+  return { h, heading: 0 };
+}
+
+function applyGo(msg) {
   if (mp.goSent) return;
   mp.goSent = true;
   mp.waitingGo = false;
-  if (mp.host) mp.net?.send({ t: "go" });
+  const payload = msg?.h != null ? { h: msg.h, heading: msg.heading ?? 0 } : buildGoPayload();
+  if (mp.host) mp.net?.send({ t: "go", ...payload });
+  pendingSnap = false;
+  awaitingSnap = false;
+  if (plane && payload.h != null) {
+    plane.height = payload.h;
+    plane.heading = payload.heading ?? 0;
+    plane.pitch = 0;
+    plane.roll = 0;
+    ctrl.roll = 0;
+    ctrl.pitch = 0;
+    groundAlt = payload.h - (mode === "guess" ? 350 : 320);
+  }
+  camInit = false;
+  hideMpWait();
   finishSnapStart();
 }
 
@@ -999,7 +1070,10 @@ function leaveRound() {
   mp.inRound = false;
   mp.myReady = false;
   if (wasIn) mp.net?.send({ t: "done", from: mp.myId });
-  if (mp.host) checkRoundClear();
+  if (mp.host) {
+    if (mp.rematch.size) abortRematchToLobby();
+    else checkRoundClear();
+  }
 }
 
 function checkRoundClear() {
@@ -1022,7 +1096,55 @@ function finishRoomRound() {
   }
   mp.guesses.clear();
   mp.poses.clear();
+  mp.snapInfo.clear();
+  mp.rematch.clear();
+  mp.launching = false;
   hideAllMates();
+}
+
+function showMpWait(text) {
+  if (text) el.mpWaitText.textContent = text;
+  el.mpWait.classList.remove("hidden");
+}
+
+function hideMpWait() {
+  el.mpWait.classList.add("hidden");
+}
+
+function rematchNeeded() {
+  return inRoundPlayers().map((p) => p.id);
+}
+
+function updateRematchWait() {
+  if (!mp.rematch.has(mp.myId)) return;
+  const need = rematchNeeded();
+  const n = need.filter((id) => mp.rematch.has(id)).length;
+  showMpWait(`Czekam aż wszyscy klikną… ${n}/${need.length || 1}`);
+}
+
+function requestRematch() {
+  if (!mp.active || mp.rematch.has(mp.myId) || mp.launching) return;
+  mp.rematch.add(mp.myId);
+  mp.net?.send({ t: "rematch", from: mp.myId });
+  hideBanner();
+  el.gmRetry.style.display = "none";
+  el.gmClose.style.display = "none";
+  updateRematchWait();
+  if (mp.host) tryLaunchRematch();
+}
+
+function tryLaunchRematch() {
+  if (!mp.host || mp.launching) return;
+  const need = rematchNeeded();
+  if (!need.length || need.some((id) => !mp.rematch.has(id))) return;
+  launchMpRound();
+}
+
+function abortRematchToLobby() {
+  if (!mp.host) return;
+  finishRoomRound();
+  mp.net?.send({ t: "roundEnd" });
+  broadcastRoster();
 }
 
 function backToLobby() {
@@ -1436,6 +1558,7 @@ function finishSnapStart() {
   el.guessmap.classList.remove("show");
   el.menuError.textContent = "";
   carousel.setActive(false);
+  hideMpWait();
   timerActive = mode !== "free";
 }
 
@@ -1540,7 +1663,7 @@ function openGuessMap() {
   el.gmClose.style.display = "none";
   el.gmRetry.style.display = "none";
   el.gmClose.textContent = mp.active ? "Wróć do pokoju" : "Wróć do menu";
-  el.gmRetry.textContent = mp.active ? "Jeszcze runda" : "Spróbuj ponownie";
+  el.gmRetry.textContent = mp.active ? "Jeszcze jedna runda" : "Spróbuj ponownie";
   el.gmSub.textContent = mp.active
     ? "Kliknij, gdzie was wyrzucono — kto bliżej, wygrywa"
     : GUESS_SCOPES[guessScope].sub;
@@ -1651,8 +1774,7 @@ el.bannerMenu.addEventListener("click", () => {
 
 el.gmRetry.addEventListener("click", () => {
   if (mp.active) {
-    el.guessmap.classList.remove("show");
-    backToLobby();
+    requestRematch();
     return;
   }
   el.gmResult.textContent = "Losuję nowy punkt…";
