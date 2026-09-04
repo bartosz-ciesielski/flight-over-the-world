@@ -140,7 +140,7 @@ kbd {
 #loader {
   position: fixed;
   inset: 0;
-  z-index: 5;
+  z-index: 12;
   display: grid;
   place-items: center;
   background:
@@ -273,10 +273,205 @@ kbd {
 
 #menu.hidden {
   opacity: 0;
+  visibility: hidden;
   pointer-events: none;
 }
 
+#landing,
+#lobby {
+  position: fixed;
+  inset: 0;
+  z-index: 8;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(circle at 70% 15%, rgba(216, 162, 74, 0.14), transparent 45%),
+    rgba(10, 14, 10, 0.66);
+  backdrop-filter: blur(6px);
+  transition: opacity 0.35s ease;
+}
+
+#landing.hidden,
+#lobby.hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.landing-sub {
+  margin: -6px 0 28px;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.landing-modes {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.landing-modes button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  padding: 20px 22px;
+  background: rgba(243, 234, 214, 0.05);
+  border: 1px solid rgba(243, 234, 214, 0.14);
+  border-radius: 8px;
+  color: var(--paper);
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+}
+
+.landing-modes button:hover {
+  background: rgba(243, 234, 214, 0.1);
+  border-color: var(--gold);
+  transform: translateY(-2px);
+}
+
+.landing-modes .m-name { font-size: 20px; }
+.landing-modes .m-sub { font-size: 13px; color: var(--muted); line-height: 1.4; }
+
+.back-btn {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid rgba(243, 234, 214, 0.22);
+  border-radius: 6px;
+  color: var(--paper);
+  font-family: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.back-btn:hover { background: rgba(243, 234, 214, 0.08); }
+
+.landing-card { width: min(520px, calc(100vw - 48px)); }
+
+.lobby-card { width: min(560px, calc(100vw - 48px)); }
+
+.lobby-modes {
+  grid-template-columns: 1fr;
+  max-width: 260px;
+  margin-inline: auto;
+}
+
+.lobby-modes .mode-card:disabled {
+  cursor: default;
+  transform: none;
+}
+
+.lobby-modes .mode-card:disabled:hover {
+  transform: none;
+  background: rgba(216, 162, 74, 0.14);
+}
+
+#lobby-scopes {
+  flex: 1;
+  display: flex;
+  border: 1px solid rgba(243, 234, 214, 0.2);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+#lobby-scopes.locked {
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.lobby-players {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 4px 0 18px;
+  text-align: left;
+}
+
+.player-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  background: rgba(243, 234, 214, 0.05);
+  border: 1px solid rgba(243, 234, 214, 0.12);
+  border-radius: 8px;
+  font-size: 15px;
+}
+
+.player-row .p-ready {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.player-row.ready .p-ready { color: var(--gold); }
+
+.player-row.empty {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.lobby-link-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+#lobby-link {
+  flex: 1;
+  padding: 12px 14px;
+  background: rgba(243, 234, 214, 0.07);
+  border: 1px solid rgba(243, 234, 214, 0.2);
+  border-radius: 6px;
+  color: var(--paper);
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+#lobby-copy,
+#lobby-start {
+  padding: 12px 20px;
+  background: var(--gold);
+  border: none;
+  border-radius: 6px;
+  color: #1c1710;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+#lobby-start {
+  width: 100%;
+  padding: 14px 20px;
+  font-size: 16px;
+}
+
+#lobby-copy:hover,
+#lobby-start:hover { filter: brightness(1.1); }
+
+#lobby-start:disabled { opacity: 0.55; cursor: wait; }
+
+#lobby-status {
+  min-height: 18px;
+  margin: 0 0 14px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+#lobby-status.err { color: #ff9d7a; }
+
 .menu-card {
+  position: relative;
   width: min(760px, calc(100vw - 48px));
   padding: 30px 38px 26px;
   background: rgba(18, 14, 10, 0.78);
@@ -480,7 +675,7 @@ kbd {
 #guessmap {
   position: fixed;
   inset: 0;
-  z-index: 5;
+  z-index: 9;
   display: grid;
   place-items: center;
   background: rgba(10, 14, 10, 0.72);

@@ -283,16 +283,20 @@ function drawGeoMap(canvas, geo, marks, project) {
     }
   }
 
-  if (marks.length === 2) {
-    const [x1, y1] = project(marks[0].lon, marks[0].lat, w, h);
-    const [x2, y2] = project(marks[1].lon, marks[1].lat, w, h);
-    ctx.beginPath();
-    ctx.moveTo(x1, y1);
-    ctx.lineTo(x2, y2);
+  const truth = marks.find((m) => m.truth) || (marks.length === 2 ? marks[0] : null);
+  if (truth) {
+    const [x1, y1] = project(truth.lon, truth.lat, w, h);
     ctx.setLineDash([5, 5]);
-    ctx.strokeStyle = "rgba(243, 234, 214, 0.6)";
     ctx.lineWidth = 1.5;
-    ctx.stroke();
+    for (const m of marks) {
+      if (m === truth) continue;
+      const [x2, y2] = project(m.lon, m.lat, w, h);
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.strokeStyle = "rgba(243, 234, 214, 0.6)";
+      ctx.stroke();
+    }
     ctx.setLineDash([]);
   }
 }

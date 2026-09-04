@@ -75,6 +75,12 @@ import {
   drawWorldMap,
   unprojectWorld,
 } from "./game/modes.js";
+import {
+  parseRoomFromUrl,
+  roomLink,
+  hostRoom,
+  joinRoom,
+} from "./game/net.js";
 
 // zakresy trybu "Zgadnij region"
 const GUESS_SCOPES = {
@@ -199,6 +205,29 @@ let geoCache = null;
 let beaconGrounded = false;
 const explosions = [];
 let shake = 0;
+let mateMesh = null;
+let mateKey = "";
+const matePos = new Vector3();
+const mateQuat = new Quaternion();
+
+const mp = {
+  active: false,
+  host: false,
+  roomId: "",
+  net: null,
+  peerOn: false,
+  myReady: false,
+  theirReady: false,
+  theirName: "",
+  myName: "Host",
+  theirPlane: "pa28",
+  pose: null,
+  myGuess: null,
+  theirGuess: null,
+  truth: null,
+  lastPoseAt: 0,
+  score: { me: 0, them: 0 },
+};
 
 const ctrl = { roll: 0, pitch: 0, throttle: 0 };
 const keys = new Set();
@@ -237,6 +266,18 @@ const el = {
   gmRetry: document.getElementById("gm-retry"),
   gmSub: document.getElementById("gm-sub"),
   guessScope: document.getElementById("guess-scope"),
+  landing: document.getElementById("landing"),
+  lobby: document.getElementById("lobby"),
+  btnSolo: document.getElementById("btn-solo"),
+  btnMulti: document.getElementById("btn-multi"),
+  menuBack: document.getElementById("menu-back"),
+  lobbyBack: document.getElementById("lobby-back"),
+  lobbyPlayers: document.getElementById("lobby-players"),
+  lobbyLink: document.getElementById("lobby-link"),
+  lobbyCopy: document.getElementById("lobby-copy"),
+  lobbyStart: document.getElementById("lobby-start"),
+  lobbyStatus: document.getElementById("lobby-status"),
+  lobbyScopes: document.getElementById("lobby-scopes"),
 };
 
 // karuzela pojazdów — jeden duży podgląd, strzałki w bok
@@ -260,6 +301,7 @@ function selectPlane(i, dir) {
 el.carPrev.addEventListener("click", () => selectPlane(planeIdx - 1, -1));
 el.carNext.addEventListener("click", () => selectPlane(planeIdx + 1, 1));
 selectPlane(0);
+carousel.setActive(false);
 
 // wybór trybu — same przyciski, instrukcja pokazuje się dopiero pod spodem
 const MODE_PLACEHOLDERS = {
@@ -274,7 +316,7 @@ const MODE_DESCS = {
 };
 function selectMode(m) {
   mode = m;
-  document.querySelectorAll(".mode-card").forEach((b) =>
+  document.querySelectorAll("#menu .mode-card").forEach((b) =>
     b.classList.toggle("selected", b.dataset.mode === m)
   );
   el.modeDesc.textContent = MODE_DESCS[m];
@@ -283,18 +325,286 @@ function selectMode(m) {
   el.guessScope.style.display = m === "guess" ? "" : "none";
   el.menuError.textContent = "";
 }
-document.querySelectorAll(".mode-card").forEach((btn) => {
+document.querySelectorAll("#menu .mode-card").forEach((btn) => {
   btn.addEventListener("click", () => selectMode(btn.dataset.mode));
 });
-document.querySelectorAll(".scope-btn").forEach((btn) => {
+document.querySelectorAll("#menu .scope-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
     guessScope = btn.dataset.scope;
-    document.querySelectorAll(".scope-btn").forEach((b) =>
+    document.querySelectorAll("#menu .scope-btn").forEach((b) =>
       b.classList.toggle("selected", b === btn)
     );
   });
 });
 selectMode("guess");
+
+function showLanding() {
+  closeRoom();
+  mp.active = false;
+  menuOpen = true;
+  el.landing.classList.remove("hidden");
+  el.menu.classList.add("hidden");
+  el.lobby.classList.add("hidden");
+  carousel.setActive(false);
+  history.replaceState(null, "", location.pathname + location.search);
+}
+
+function showSoloMenu() {
+  mp.active = false;
+  menuOpen = true;
+  el.landing.classList.add("hidden");
+  el.lobby.classList.add("hidden");
+  el.menu.classList.remove("hidden");
+  carousel.setActive(true);
+}
+
+function showLobby() {
+  menuOpen = true;
+  el.landing.classList.add("hidden");
+  el.menu.classList.add("hidden");
+  el.lobby.classList.remove("hidden");
+  carousel.setActive(false);
+  renderLobby();
+}
+
+function setLobbyStatus(msg, isErr = false) {
+  el.lobbyStatus.textContent = msg;
+  el.lobbyStatus.classList.toggle("err", isErr);
+}
+
+function renderLobby() {
+  const rows = [];
+  rows.push(playerRow(mp.myName + " (Ty)", mp.myReady));
+  if (mp.peerOn) rows.push(playerRow(mp.theirName || "Gość", mp.theirReady));
+  else rows.push(`<div class="player-row empty">Czekam na drugiego gracza…</div>`);
+  el.lobbyPlayers.innerHTML = rows.join("");
+  el.lobbyScopes.classList.toggle("locked", !mp.host);
+  if (mp.roomId) el.lobbyLink.value = roomLink(mp.roomId);
+  el.lobbyStart.textContent = mp.myReady ? "Anuluj gotowość" : "Start";
+  if (!mp.peerOn) setLobbyStatus("Wyślij link znajomemu — oboje musicie nacisnąć Start");
+  else if (mp.myReady && mp.theirReady) setLobbyStatus("Startujemy…");
+  else if (mp.myReady) setLobbyStatus("Czekam aż drugi gracz naciśnie Start");
+  else setLobbyStatus("Oboje naciśnijcie Start, żeby lecieć razem");
+}
+
+function playerRow(name, ready) {
+  return `<div class="player-row${ready ? " ready" : ""}"><span>${name}</span><span class="p-ready">${ready ? "GOTOWY" : "CZEKA"}</span></div>`;
+}
+
+function attachNet(api) {
+  mp.net = api;
+}
+
+function handleNetData(data) {
+  if (!data || !data.t) return;
+  if (data.t === "hello") {
+    mp.theirName = data.name || "Gość";
+    mp.theirPlane = data.plane || "pa28";
+    if (mp.host) {
+      mp.net?.send({
+        t: "welcome",
+        name: mp.myName,
+        plane: selectedPlane,
+        scope: guessScope,
+        ready: mp.myReady,
+        score: mp.score,
+      });
+    }
+    renderLobby();
+  } else if (data.t === "welcome") {
+    mp.theirName = data.name || "Host";
+    mp.theirPlane = data.plane || "pa28";
+    mp.theirReady = !!data.ready;
+    if (data.scope) setLobbyScope(data.scope);
+    if (data.score) mp.score = { me: data.score.them ?? 0, them: data.score.me ?? 0 };
+    renderLobby();
+  } else if (data.t === "scope") {
+    setLobbyScope(data.scope);
+  } else if (data.t === "ready") {
+    mp.theirReady = !!data.ready;
+    renderLobby();
+    tryStartMp();
+  } else if (data.t === "start") {
+    startMpFlight(data.lat, data.lon, data.scope);
+  } else if (data.t === "pose") {
+    mp.pose = data;
+    if (data.plane && data.plane !== mateKey) loadMatePlane(data.plane);
+  } else if (data.t === "guess") {
+    mp.theirGuess = { lat: data.lat, lon: data.lon };
+    if (mp.myGuess) revealMpGuesses();
+    else if (guessOpen) el.gmResult.textContent = "Rywal zaznaczył — teraz Twoja kolej";
+  }
+}
+
+function handlePeerJoined() {
+  mp.peerOn = true;
+  mp.net?.send({ t: "hello", name: mp.myName, plane: selectedPlane });
+  renderLobby();
+}
+
+function handlePeerLeft() {
+  mp.peerOn = false;
+  mp.theirReady = false;
+  mp.theirName = "";
+  mp.pose = null;
+  if (mateMesh) mateMesh.visible = false;
+  if (mp.active && !menuOpen) {
+    hideBanner();
+    backToLobby();
+    setLobbyStatus("Drugi gracz wyszedł z pokoju", true);
+  } else {
+    renderLobby();
+    setLobbyStatus("Drugi gracz wyszedł z pokoju", true);
+  }
+}
+
+function handleNetError(err) {
+  const msg = err?.type === "peer-unavailable"
+    ? "Nie znaleziono pokoju — poproś o nowy link"
+    : err?.type === "unavailable-id"
+      ? "Ten pokój jest zajęty — spróbuj ponownie"
+      : "Błąd połączenia — sprawdź sieć";
+  setLobbyStatus(msg, true);
+}
+
+function closeRoom() {
+  mp.net?.destroy();
+  mp.net = null;
+  mp.peerOn = false;
+  mp.roomId = "";
+  mp.host = false;
+  mp.myReady = false;
+  mp.theirReady = false;
+  mp.theirName = "";
+  mp.pose = null;
+  mp.score = { me: 0, them: 0 };
+  if (mateMesh) mateMesh.visible = false;
+}
+
+function openHostLobby() {
+  closeRoom();
+  mp.active = true;
+  mp.host = true;
+  mp.myName = "Host";
+  mp.score = { me: 0, them: 0 };
+  showLobby();
+  setLobbyStatus("Tworzę pokój…");
+  const api = hostRoom({
+    onOpen(id) {
+      mp.roomId = id;
+      history.replaceState(null, "", `#r=${id}`);
+      el.lobbyLink.value = roomLink(id);
+      renderLobby();
+    },
+    onPeer: handlePeerJoined,
+    onData: handleNetData,
+    onLeft: handlePeerLeft,
+    onError: handleNetError,
+  });
+  attachNet(api);
+}
+
+function openGuestLobby(id) {
+  closeRoom();
+  mp.active = true;
+  mp.host = false;
+  mp.myName = "Gość";
+  mp.roomId = id;
+  mp.score = { me: 0, them: 0 };
+  showLobby();
+  el.lobbyLink.value = roomLink(id);
+  setLobbyStatus("Łączę z pokojem…");
+  history.replaceState(null, "", `#r=${id}`);
+  const api = joinRoom(id, {
+    onOpen() {
+      renderLobby();
+    },
+    onPeer: handlePeerJoined,
+    onData: handleNetData,
+    onLeft: handlePeerLeft,
+    onError: handleNetError,
+  });
+  attachNet(api);
+}
+
+function tryStartMp() {
+  if (mp.host && mp.myReady && mp.theirReady && mp.peerOn) launchMpRound();
+}
+
+async function launchMpRound() {
+  el.lobbyStart.disabled = true;
+  const scope = GUESS_SCOPES[guessScope];
+  setLobbyStatus(scope.status);
+  try {
+    geoCache = await scope.load();
+    const p = scope.random(geoCache);
+    mp.net?.send({ t: "start", lat: p.lat, lon: p.lon, scope: guessScope });
+    startMpFlight(p.lat, p.lon, guessScope);
+  } catch {
+    setLobbyStatus("Błąd — sprawdź sieć i spróbuj ponownie", true);
+    el.lobbyStart.disabled = false;
+  }
+}
+
+async function startMpFlight(lat, lon, scope) {
+  mode = "guess";
+  guessScope = scope || guessScope;
+  mp.active = true;
+  mp.myGuess = null;
+  mp.theirGuess = null;
+  mp.truth = { lat, lon };
+  mp.myReady = false;
+  mp.theirReady = false;
+  mp.pose = null;
+  timeLeft = GUESS_TIME;
+  timerActive = false;
+  el.lobbyStart.disabled = false;
+  setLobbyStatus("Ładowanie terenu…");
+  if (!geoCache) {
+    try {
+      geoCache = await GUESS_SCOPES[guessScope].load();
+    } catch {
+      setLobbyStatus("Nie udało się wczytać mapy", true);
+      return;
+    }
+  }
+  const spawn = mp.host ? { lat, lon } : offsetPoint(lat, lon, 0.08);
+  loadMatePlane(mp.theirPlane || "pa28");
+  beginFlight(spawn.lat, spawn.lon);
+}
+
+function backToLobby() {
+  hideBanner();
+  menuOpen = true;
+  timerActive = false;
+  guessOpen = false;
+  awaitingSnap = false;
+  crashed = false;
+  finished = false;
+  beacon.visible = false;
+  el.guessmap.classList.remove("show");
+  mp.myReady = false;
+  mp.theirReady = false;
+  mp.myGuess = null;
+  mp.theirGuess = null;
+  if (mateMesh) mateMesh.visible = false;
+  if (planeMesh) planeMesh.visible = true;
+  showLobby();
+}
+
+function setLobbyScope(scope, broadcast = false) {
+  guessScope = scope;
+  document.querySelectorAll("#lobby-scopes .scope-btn").forEach((b) =>
+    b.classList.toggle("selected", b.dataset.scope === scope)
+  );
+  if (broadcast && mp.host && mp.net) mp.net.send({ t: "scope", scope });
+}
+document.querySelectorAll("#lobby-scopes .scope-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    if (!mp.host) return;
+    setLobbyScope(btn.dataset.scope, true);
+  });
+});
 
 function init() {
   if (!ION_KEY && !API_KEY) {
@@ -439,6 +749,42 @@ function loadPlane(key) {
   });
 }
 
+function loadMatePlane(key) {
+  if (!key || !PLANES[key] || !scene) return;
+  if (mateMesh && mateKey === key) return;
+  mateKey = key;
+  const spec = PLANES[key];
+  if (mateMesh) scene.remove(mateMesh);
+  mateMesh = createPlaneMesh();
+  mateMesh.userData.key = key;
+  mateMesh.visible = false;
+  scene.add(mateMesh);
+  new GLTFLoader().load(spec.file, (gltf) => {
+    if (mateKey !== key) return;
+    const model = gltf.scene;
+    if (spec.prepare) spec.prepare(model);
+    const box = new Box3().setFromObject(model);
+    const size = box.getSize(new Vector3());
+    model.scale.setScalar(spec.wingspan / Math.max(size.x, size.y, size.z));
+    box.setFromObject(model);
+    model.position.sub(box.getCenter(new Vector3()));
+    model.traverse((o) => {
+      if (o.isMesh && o.material) {
+        o.material.metalness = 0.15;
+        o.material.roughness = 0.65;
+        o.castShadow = true;
+      }
+    });
+    const wrapper = new Group();
+    wrapper.add(model);
+    wrapper.userData.key = key;
+    scene.remove(mateMesh);
+    mateMesh = wrapper;
+    mateMesh.visible = mp.active && !menuOpen && !!mp.pose;
+    scene.add(mateMesh);
+  });
+}
+
 function resetFlight(latDeg, lonDeg) {
   const spec = PLANES[selectedPlane];
   startLat = latDeg;
@@ -521,11 +867,12 @@ function wingHit() {
 
 function crash() {
   crashed = true;
-  timerActive = false;
   explosions.push(createExplosion(scene, planePos.clone()));
   playExplosionSound();
   shake = 1;
-  planeMesh.visible = false;
+  if (planeMesh) planeMesh.visible = false;
+  if (mp.active) return; // runda trwa — po minucie i tak zgadujecie
+  timerActive = false;
   setTimeout(() => showBanner("ROZBIŁEŚ SIĘ"), 900);
 }
 
@@ -610,6 +957,8 @@ function finishSnapStart() {
   guessOpen = false;
   guessAnswered = false;
   el.menu.classList.add("hidden");
+  el.landing.classList.add("hidden");
+  el.lobby.classList.add("hidden");
   el.guessmap.classList.remove("show");
   el.menuError.textContent = "";
   carousel.setActive(false);
@@ -631,6 +980,42 @@ el.city.addEventListener("keydown", (e) => {
   if (e.key === "Enter") startGame();
 });
 
+el.btnSolo.addEventListener("click", () => {
+  unlockAudio();
+  showSoloMenu();
+});
+el.btnMulti.addEventListener("click", () => {
+  unlockAudio();
+  openHostLobby();
+});
+el.menuBack.addEventListener("click", () => showLanding());
+el.lobbyBack.addEventListener("click", () => showLanding());
+el.lobbyCopy.addEventListener("click", async () => {
+  const link = el.lobbyLink.value;
+  if (!link) return;
+  try {
+    await navigator.clipboard.writeText(link);
+    el.lobbyCopy.textContent = "Skopiowano";
+    setTimeout(() => { el.lobbyCopy.textContent = "Kopiuj link"; }, 1600);
+  } catch {
+    el.lobbyLink.select();
+  }
+});
+el.lobbyStart.addEventListener("click", () => {
+  unlockAudio();
+  if (!mp.peerOn) {
+    setLobbyStatus("Najpierw poczekaj, aż ktoś wejdzie z linku", true);
+    return;
+  }
+  mp.myReady = !mp.myReady;
+  mp.net?.send({ t: "ready", ready: mp.myReady });
+  renderLobby();
+  tryStartMp();
+});
+
+const joinId = parseRoomFromUrl();
+if (joinId) openGuestLobby(joinId);
+
 // --- pauza (ESC) ---
 function setPaused(v) {
   paused = v;
@@ -641,7 +1026,8 @@ function setPaused(v) {
 el.resume.addEventListener("click", () => setPaused(false));
 el.restart.addEventListener("click", () => {
   setPaused(false);
-  backToMenu();
+  if (mp.active) backToLobby();
+  else backToMenu();
 });
 
 function backToMenu() {
@@ -654,6 +1040,8 @@ function backToMenu() {
   el.guessmap.classList.remove("show");
   el.start.disabled = false;
   el.menuError.textContent = "";
+  el.landing.classList.add("hidden");
+  el.lobby.classList.add("hidden");
   el.menu.classList.remove("hidden");
   carousel.setActive(true);
 }
@@ -670,10 +1058,39 @@ function openGuessMap() {
   el.gmResult.textContent = "";
   el.gmClose.style.display = "none";
   el.gmRetry.style.display = "none";
-  el.gmSub.textContent = GUESS_SCOPES[guessScope].sub;
+  el.gmClose.textContent = mp.active ? "Wróć do pokoju" : "Wróć do menu";
+  el.gmRetry.textContent = mp.active ? "Jeszcze runda" : "Spróbuj ponownie";
+  el.gmSub.textContent = mp.active
+    ? "Kliknij, gdzie was wyrzucono — kto bliżej, wygrywa"
+    : GUESS_SCOPES[guessScope].sub;
   el.guessmap.classList.add("show");
-  // canvas musi mieć wymiary zanim narysujemy
   requestAnimationFrame(() => drawGuessMap());
+}
+
+function revealMpGuesses() {
+  if (!mp.myGuess || !mp.theirGuess || !mp.truth || guessAnswered) return;
+  guessAnswered = true;
+  const myErr = distanceM(mp.myGuess.lat, mp.myGuess.lon, mp.truth.lat, mp.truth.lon) / 1000;
+  const theirErr = distanceM(mp.theirGuess.lat, mp.theirGuess.lon, mp.truth.lat, mp.truth.lon) / 1000;
+  drawGuessMap([
+    { lat: mp.truth.lat, lon: mp.truth.lon, color: "#d8a24a", label: "Tu byliście", truth: true },
+    { lat: mp.myGuess.lat, lon: mp.myGuess.lon, color: "#7ec8e3", label: "Ty" },
+    { lat: mp.theirGuess.lat, lon: mp.theirGuess.lon, color: "#e37e7e", label: mp.theirName || "Rywal" },
+  ]);
+  const draw = Math.abs(myErr - theirErr) < 0.5;
+  const win = myErr < theirErr;
+  if (!draw) {
+    if (win) mp.score.me += 1;
+    else mp.score.them += 1;
+  }
+  const them = mp.theirName || "Rywal";
+  el.gmResult.textContent = draw
+    ? `Remis — Ty ${Math.round(myErr)} km · ${them} ${Math.round(theirErr)} km  (${mp.score.me}–${mp.score.them})`
+    : win
+      ? `Wygrywasz! Ty ${Math.round(myErr)} km · ${them} ${Math.round(theirErr)} km  (${mp.score.me}–${mp.score.them})`
+      : `Przegrywasz — Ty ${Math.round(myErr)} km · ${them} ${Math.round(theirErr)} km  (${mp.score.me}–${mp.score.them})`;
+  el.gmClose.style.display = "";
+  el.gmRetry.style.display = "";
 }
 
 el.gmCanvas.addEventListener("click", (e) => {
@@ -685,10 +1102,21 @@ el.gmCanvas.addEventListener("click", (e) => {
     rect.width,
     rect.height
   );
+  if (mp.active) {
+    if (mp.myGuess) return;
+    mp.myGuess = { lat, lon };
+    mp.net?.send({ t: "guess", lat, lon });
+    drawGuessMap([
+      { lat, lon, color: "#7ec8e3", label: "Ty" },
+    ]);
+    if (mp.theirGuess) revealMpGuesses();
+    else el.gmResult.textContent = "Czekam na zaznaczenie rywala…";
+    return;
+  }
   const errKm = distanceM(lat, lon, plane.latDeg, plane.lonDeg) / 1000;
   guessAnswered = true;
   drawGuessMap([
-    { lat: plane.latDeg, lon: plane.lonDeg, color: "#d8a24a", label: "Tu byłeś" },
+    { lat: plane.latDeg, lon: plane.lonDeg, color: "#d8a24a", label: "Tu byłeś", truth: true },
     { lat, lon, color: "#f3ead6", label: "Twój strzał" },
   ]);
   el.gmResult.textContent = `Różnica: ${Math.round(errKm)} km`;
@@ -698,21 +1126,32 @@ el.gmCanvas.addEventListener("click", (e) => {
 
 el.gmClose.addEventListener("click", () => {
   el.guessmap.classList.remove("show");
-  backToMenu();
+  if (mp.active) backToLobby();
+  else backToMenu();
 });
 
-el.bannerRetry.addEventListener("click", () => restartMode());
+el.bannerRetry.addEventListener("click", () => {
+  if (mp.active) {
+    hideBanner();
+    backToLobby();
+  } else restartMode();
+});
 el.bannerMenu.addEventListener("click", () => {
   hideBanner();
-  backToMenu();
+  if (mp.active) backToLobby();
+  else backToMenu();
 });
 
 el.gmRetry.addEventListener("click", () => {
-  // overlay zostaje — nowy punkt ładuje się pod spodem, start po dosadzeniu na ~500 m
+  if (mp.active) {
+    el.guessmap.classList.remove("show");
+    backToLobby();
+    return;
+  }
   el.gmResult.textContent = "Losuję nowy punkt…";
   el.gmRetry.style.display = "none";
   el.gmClose.style.display = "none";
-  restartMode(); // ustawia awaitingSnap — overlay zamknie finishSnapStart
+  restartMode();
 });
 
 window.addEventListener("keydown", (e) => {
@@ -729,6 +1168,10 @@ window.addEventListener("keydown", (e) => {
 window.addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
 
 function restartMode() {
+  if (mp.active) {
+    backToLobby();
+    return;
+  }
   if (mode === "home" && homeTarget) {
     timeLeft = HOME_TIME;
     timerActive = false; // włączy się po dosadzeniu (finishSnapStart)
@@ -808,6 +1251,40 @@ function animate() {
   planeMesh.quaternion.copy(planeQuat);
   if (planeMesh.userData.prop) {
     planeMesh.userData.prop.rotation.z += plane.speed * dt * 1.6;
+  }
+
+  if (mp.active && mp.peerOn && !menuOpen && !guessOpen && !crashed) {
+    const now = performance.now();
+    if (now - mp.lastPoseAt > 100) {
+      mp.lastPoseAt = now;
+      mp.net?.send({
+        t: "pose",
+        lat: plane.latDeg,
+        lon: plane.lonDeg,
+        h: plane.height,
+        heading: plane.heading,
+        pitch: plane.pitch,
+        roll: plane.roll,
+        plane: selectedPlane,
+      });
+    }
+  }
+  if (mateMesh && mp.pose && mp.active && !menuOpen) {
+    const deg = Math.PI / 180;
+    const mm = frameAt(
+      mp.pose.lat * deg,
+      mp.pose.lon * deg,
+      mp.pose.h,
+      mp.pose.heading,
+      mp.pose.pitch,
+      -mp.pose.roll
+    );
+    mm.decompose(matePos, mateQuat, mateMesh.scale);
+    mateMesh.position.copy(matePos);
+    mateMesh.quaternion.copy(mateQuat);
+    mateMesh.visible = true;
+  } else if (mateMesh) {
+    mateMesh.visible = false;
   }
 
   // sztywna kamera za samolotem — tylko kurs, bez przechyłu/pochylenia
@@ -914,7 +1391,7 @@ function animate() {
   }
 
   // tryby: timer + warunki wygranej
-  if (timerActive && !menuOpen && !paused && !guessOpen && !crashed && !finished) {
+  if (timerActive && !menuOpen && !paused && !guessOpen && !finished && (!crashed || mp.active)) {
     timeLeft -= dt;
     if (timeLeft <= 0) {
       timeLeft = 0;

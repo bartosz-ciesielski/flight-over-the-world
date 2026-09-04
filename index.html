@@ -19,8 +19,53 @@
       </div>
     </div>
 
-    <div id="menu">
+    <div id="landing">
+      <div class="menu-card landing-card">
+        <h1>Lot nad światem</h1>
+        <p class="landing-sub">Wybierz tryb gry</p>
+        <div class="landing-modes">
+          <button id="btn-solo" type="button">
+            <span class="m-name">Single player</span>
+            <span class="m-sub">Lecisz sam — swobodny lot, dom, zgadnij region</span>
+          </button>
+          <button id="btn-multi" type="button">
+            <span class="m-name">Multiplayer</span>
+            <span class="m-sub">Zaproś znajomego linkiem i zgadujcie region</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div id="lobby" class="hidden">
+      <div class="menu-card lobby-card">
+        <button id="lobby-back" class="back-btn" type="button">‹ Wstecz</button>
+        <h1>Pokój</h1>
+        <p class="landing-sub">Zgadnij region — minuta lotu, potem mapa</p>
+        <div class="modes lobby-modes">
+          <button class="mode-card selected" type="button" disabled>
+            <span class="m-name">Zgadnij region</span>
+          </button>
+        </div>
+        <div id="lobby-scope" class="start-row" style="margin-bottom: 16px">
+          <div id="lobby-scopes" class="guess-scope-bar">
+            <button class="scope-btn selected" data-scope="pl" type="button">🇵🇱 Polska</button>
+            <button class="scope-btn" data-scope="eu" type="button">🇪🇺 Europa</button>
+            <button class="scope-btn" data-scope="world" type="button">🌍 Świat</button>
+          </div>
+        </div>
+        <div id="lobby-players" class="lobby-players"></div>
+        <div class="lobby-link-row">
+          <input id="lobby-link" type="text" readonly />
+          <button id="lobby-copy" type="button">Kopiuj link</button>
+        </div>
+        <p id="lobby-status"></p>
+        <button id="lobby-start" type="button">Start</button>
+      </div>
+    </div>
+
+    <div id="menu" class="hidden">
       <div class="menu-card">
+        <button id="menu-back" class="back-btn" type="button">‹ Wstecz</button>
         <h1>Lot nad światem</h1>
 
         <div class="carousel">
