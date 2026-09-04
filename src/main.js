@@ -1041,8 +1041,9 @@ async function startMpFlight(msg) {
   if (mp.host) {
     broadcastRoster();
     setTimeout(() => {
-      if (mp.host && mp.roundActive && !mp.goSent) applyGo();
-    }, 10000);
+      if (!mp.host || !mp.roundActive || mp.goSent) return;
+      if ([...mp.snapInfo.values()].some((s) => isHoverHeight(s.h))) applyGo();
+    }, 12000);
   }
 }
 
@@ -1051,7 +1052,7 @@ function reportSnapped() {
   mp.waitingGo = true;
   setLobbyStatus("Czekam aż wszyscy będą gotowi…");
   showMpWait("Czekam aż wszyscy będą gotowi…");
-  const info = { h: plane.height, heading: 0 };
+  const info = { h: plane.height, gh: groundAlt, heading: 0 };
   mp.snapInfo.set(mp.myId, info);
   mp.net?.send({ t: "snapped", from: mp.myId, ...info });
   if (mp.host) {
@@ -1066,12 +1067,21 @@ function tryReleaseGo() {
   if (need.length && need.every((id) => mp.snapped.has(id))) applyGo();
 }
 
+function snapAgl() {
+  return mode === "guess" ? 350 : 320;
+}
+
+function isHoverHeight(h) {
+  return Number.isFinite(h) && h < 4000;
+}
+
 function buildGoPayload() {
-  const heights = [...mp.snapInfo.values()].map((s) => s.h).filter((h) => Number.isFinite(h));
-  const h = heights.length
-    ? heights.slice().sort((a, b) => a - b)[Math.floor(heights.length / 2)]
-    : plane?.height;
-  return { h, heading: 0 };
+  const heights = [...mp.snapInfo.values()].map((s) => s.h).filter(isHoverHeight);
+  if (heights.length) {
+    return { h: heights.slice().sort((a, b) => a - b)[Math.floor(heights.length / 2)], heading: 0 };
+  }
+  if (isHoverHeight(plane?.height)) return { h: plane.height, heading: 0 };
+  return { h: (Number.isFinite(groundAlt) ? groundAlt : TERRAIN_ALT) + snapAgl(), heading: 0 };
 }
 
 function applyGo(msg) {
@@ -1089,7 +1099,7 @@ function applyGo(msg) {
     plane.roll = 0;
     ctrl.roll = 0;
     ctrl.pitch = 0;
-    groundAlt = payload.h - (mode === "guess" ? 350 : 320);
+    groundAlt = payload.h - snapAgl();
   }
   camInit = false;
   mp.goAt = performance.now();
@@ -2067,21 +2077,20 @@ function animate() {
     camera.updateProjectionMatrix();
   }
 
-  if (!menuOpen && frameCount % 8 === 0) {
+  if ((!menuOpen || awaitingSnap) && frameCount % 8 === 0) {
     const gh = probeGround(plane.lat, plane.lon, plane.height);
     if (gh !== null) {
       groundAlt = gh;
       if (pendingSnap) {
-        // podążaj za doprecyzowującym się terenem; dosadź gdy pomiar się ustabilizuje
-        // i nic się już nie doczytuje — inaczej zgrubny kafelek daje kraksę albo 1300 m
-        plane.height = gh + (mode === "guess" ? 350 : 320);
-        if (snapLastGh !== null && Math.abs(gh - snapLastGh) < 25 && !tiles.isLoading) {
+        plane.height = gh + snapAgl();
+        if (snapLastGh !== null && Math.abs(gh - snapLastGh) < 25) {
           snapStableCount += 1;
         } else {
           snapStableCount = 0;
         }
         snapLastGh = gh;
-        if (snapStableCount >= 2) {
+        const need = tiles.isLoading ? 4 : 2;
+        if (snapStableCount >= need) {
           pendingSnap = false;
           if (awaitingSnap) {
             awaitingSnap = false;
@@ -2096,6 +2105,7 @@ function animate() {
   if (awaitingSnap && performance.now() - awaitingSnapSince > 15000) {
     awaitingSnap = false;
     pendingSnap = false;
+    if (Number.isFinite(groundAlt)) plane.height = groundAlt + snapAgl();
     if (mp.active && mp.inRound) reportSnapped();
     else finishSnapStart();
   }
