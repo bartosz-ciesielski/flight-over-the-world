@@ -80,6 +80,8 @@ import {
   roomLink,
   hostRoom,
   joinRoom,
+  wasHosting,
+  rememberHost,
 } from "./game/net.js";
 
 // zakresy trybu "Zgadnij region"
@@ -375,6 +377,7 @@ function showLanding() {
   el.lobby.classList.add("hidden");
   carousel.setActive(false);
   lobbyCarousel.setActive(false);
+  rememberHost("");
   history.replaceState(null, "", location.pathname + location.search);
 }
 
@@ -704,11 +707,15 @@ function handlePeerLeft(peerId) {
 }
 
 function handleNetError(err) {
+  if (err?.type === "unavailable-id" && mp.host && mp.roomId) {
+    openGuestLobby(mp.roomId);
+    return;
+  }
   const msg = err?.type === "peer-unavailable"
-    ? "Nie znaleziono pokoju — poproś o nowy link"
+    ? "Nie znaleziono hosta — niech otworzy Multiplayer i nie odświeża strony, potem wejdź w link jeszcze raz"
     : err?.type === "unavailable-id"
-      ? "Ten pokój jest zajęty — spróbuj ponownie"
-      : "Błąd połączenia — sprawdź sieć";
+      ? "Ten pokój jest zajęty — dołączam jako gość…"
+      : "Błąd połączenia — sprawdź sieć i wejdź w link ponownie";
   setLobbyStatus(msg, true);
 }
 
@@ -730,11 +737,12 @@ function closeRoom() {
   disposeAllMates();
 }
 
-function openHostLobby() {
+function openHostLobby(existingId) {
   closeRoom();
   mp.active = true;
   mp.host = true;
   mp.myName = "Host";
+  if (existingId) mp.roomId = existingId;
   selectLobbyMode("guess");
   showLobby();
   setLobbyStatus("Tworzę pokój…");
@@ -742,6 +750,7 @@ function openHostLobby() {
     onOpen(id) {
       mp.roomId = id;
       mp.myId = id;
+      rememberHost(id);
       history.replaceState(null, "", `#r=${id}`);
       el.lobbyLink.value = roomLink(id);
       renderLobby();
@@ -750,7 +759,7 @@ function openHostLobby() {
     onData: handleNetData,
     onLeft: handlePeerLeft,
     onError: handleNetError,
-  });
+  }, existingId);
   attachNet(api);
 }
 
@@ -765,6 +774,9 @@ function openGuestLobby(id) {
   setLobbyStatus("Łączę z pokojem…");
   history.replaceState(null, "", `#r=${id}`);
   const api = joinRoom(id, {
+    onStatus(msg) {
+      setLobbyStatus(msg);
+    },
     onOpen(_hostId, myId) {
       if (myId) mp.myId = myId;
       renderLobby();
@@ -1406,7 +1418,10 @@ el.lobbyStart.addEventListener("click", () => {
 });
 
 const joinId = parseRoomFromUrl();
-if (joinId) openGuestLobby(joinId);
+if (joinId) {
+  if (wasHosting(joinId)) openHostLobby(joinId);
+  else openGuestLobby(joinId);
+}
 
 // --- pauza (ESC) ---
 function setPaused(v) {

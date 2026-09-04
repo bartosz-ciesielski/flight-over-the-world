@@ -1,13 +1,42 @@
 import { Peer } from "peerjs";
 
+const PEER_OPTS = {
+  debug: 0,
+  secure: true,
+  host: "0.peerjs.com",
+  port: 443,
+  path: "/",
+  config: {
+    iceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:stun1.l.google.com:19302" },
+      { urls: "stun:stun.cloudflare.com:3478" },
+      {
+        urls: "turn:openrelay.metered.ca:80",
+        username: "openrelayproject",
+        credential: "openrelayproject",
+      },
+      {
+        urls: "turn:openrelay.metered.ca:443",
+        username: "openrelayproject",
+        credential: "openrelayproject",
+      },
+    ],
+  },
+};
+
+const CONNECT_OPTS = { reliable: true, serialization: "json" };
+
 function roomId() {
   return "lns" + Math.random().toString(36).slice(2, 8);
 }
 
+function guestId() {
+  return "lnsc" + Math.random().toString(36).slice(2, 10);
+}
+
 function makePeer(id) {
-  return id
-    ? new Peer(id, { debug: 0 })
-    : new Peer({ debug: 0 });
+  return new Peer(id, PEER_OPTS);
 }
 
 export function parseRoomFromUrl() {
@@ -22,8 +51,25 @@ export function roomLink(id) {
   return url.toString();
 }
 
-export function hostRoom(handlers) {
-  const id = roomId();
+export function wasHosting(id) {
+  try {
+    return sessionStorage.getItem("lns-host") === id;
+  } catch {
+    return false;
+  }
+}
+
+export function rememberHost(id) {
+  try {
+    if (id) sessionStorage.setItem("lns-host", id);
+    else sessionStorage.removeItem("lns-host");
+  } catch {
+    /* ignore */
+  }
+}
+
+export function hostRoom(handlers, existingId) {
+  const id = existingId || roomId();
   const peer = makePeer(id);
   const conns = new Map();
 
@@ -32,6 +78,20 @@ export function hostRoom(handlers) {
       if (exceptId && pid === exceptId) continue;
       if (c.open) fn(c, pid);
     }
+  }
+
+  function attach(c) {
+    const pid = c.peer;
+    conns.set(pid, c);
+    const ready = () => handlers.onPeer?.(pid);
+    c.on("open", ready);
+    c.on("data", (data) => handlers.onData?.(data, pid));
+    c.on("close", () => {
+      conns.delete(pid);
+      handlers.onLeft?.(pid);
+    });
+    c.on("error", (err) => handlers.onError?.(err));
+    if (c.open) ready();
   }
 
   const api = {
@@ -55,53 +115,95 @@ export function hostRoom(handlers) {
     },
   };
 
-  peer.on("open", () => handlers.onOpen?.(id));
-  peer.on("error", (err) => handlers.onError?.(err));
-  peer.on("connection", (c) => {
-    conns.set(c.peer, c);
-    c.on("open", () => handlers.onPeer?.(c.peer));
-    c.on("data", (data) => handlers.onData?.(data, c.peer));
-    c.on("close", () => {
-      conns.delete(c.peer);
-      handlers.onLeft?.(c.peer);
-    });
-    c.on("error", (err) => handlers.onError?.(err));
+  peer.on("open", () => {
+    rememberHost(id);
+    handlers.onOpen?.(id);
   });
+  peer.on("error", (err) => handlers.onError?.(err));
+  peer.on("connection", attach);
 
   return api;
 }
 
 export function joinRoom(hostId, handlers) {
-  const peer = makePeer();
+  const myId = guestId();
+  const peer = makePeer(myId);
   let conn = null;
+  let tries = 0;
+  let opened = false;
+  let destroyed = false;
+  const maxTries = 8;
+
+  function wire(c) {
+    conn = c;
+    c.on("open", () => {
+      if (opened || destroyed) return;
+      opened = true;
+      handlers.onOpen?.(hostId, myId);
+      handlers.onPeer?.();
+    });
+    c.on("data", (data) => handlers.onData?.(data));
+    c.on("close", () => {
+      if (!destroyed && opened) handlers.onLeft?.();
+    });
+    c.on("error", (err) => handlers.onError?.(err));
+    if (c.open && !opened) {
+      opened = true;
+      handlers.onOpen?.(hostId, myId);
+      handlers.onPeer?.();
+    }
+  }
+
+  function tryConnect() {
+    if (destroyed || opened) return;
+    tries += 1;
+    handlers.onStatus?.(`Łączę z pokojem… (${tries}/${maxTries})`);
+    try {
+      if (conn) {
+        conn.close();
+        conn = null;
+      }
+    } catch {
+      /* ignore */
+    }
+    wire(peer.connect(hostId, CONNECT_OPTS));
+    setTimeout(() => {
+      if (!opened && !destroyed && tries < maxTries) tryConnect();
+      else if (!opened && !destroyed) {
+        handlers.onError?.({ type: "peer-unavailable" });
+      }
+    }, 3500);
+  }
 
   const api = {
     id: hostId,
     host: false,
-    myPeerId: "",
+    myPeerId: myId,
     send(data) {
       if (conn?.open) conn.send(data);
     },
     sendTo() {},
     sendExcept() {},
     destroy() {
-      conn?.close();
+      destroyed = true;
+      try {
+        conn?.close();
+      } catch {
+        /* ignore */
+      }
       peer.destroy();
     },
   };
 
-  peer.on("error", (err) => handlers.onError?.(err));
-  peer.on("open", (myId) => {
-    api.myPeerId = myId;
-    conn = peer.connect(hostId, { reliable: true });
-    conn.on("open", () => {
-      handlers.onOpen?.(hostId, myId);
-      handlers.onPeer?.();
-    });
-    conn.on("data", (data) => handlers.onData?.(data));
-    conn.on("close", () => handlers.onLeft?.());
-    conn.on("error", (err) => handlers.onError?.(err));
+  peer.on("error", (err) => {
+    if (destroyed) return;
+    if (err?.type === "peer-unavailable" && tries < maxTries) {
+      setTimeout(tryConnect, 800);
+      return;
+    }
+    handlers.onError?.(err);
   });
+  peer.on("open", () => tryConnect());
 
   return api;
 }
