@@ -209,6 +209,8 @@ const explosions = [];
 let shake = 0;
 const matePos = new Vector3();
 const mateQuat = new Quaternion();
+const mateScale = new Vector3();
+const MATE_INTERP_MS = 150;
 const PLAYER_COLORS = ["#7ec8e3", "#e37e7e", "#9dce6a", "#d4a5f5", "#f0c36e", "#6ec8c1"];
 
 const mp = {
@@ -233,6 +235,7 @@ const mp = {
   waitingGo: false,
   truth: null,
   lastPoseAt: 0,
+  poseSeq: 0,
 };
 
 const ctrl = { roll: 0, pitch: 0, throttle: 0 };
@@ -667,22 +670,7 @@ function handleNetData(data, fromId) {
   } else if (data.t === "pose") {
     const id = data.from;
     if (!id || id === mp.myId) return;
-    const prev = mp.poses.get(id);
-    mp.poses.set(id, {
-      lat: data.lat,
-      lon: data.lon,
-      h: data.h,
-      heading: data.heading,
-      pitch: data.pitch,
-      roll: data.roll,
-      plane: data.plane,
-      showLat: prev?.showLat ?? data.lat,
-      showLon: prev?.showLon ?? data.lon,
-      showH: prev?.showH ?? data.h,
-      showHeading: prev?.showHeading ?? data.heading,
-      showPitch: prev?.showPitch ?? data.pitch,
-      showRoll: prev?.showRoll ?? data.roll,
-    });
+    pushMatePose(id, data);
     if (data.plane) loadMate(id, data.plane);
   } else if (data.t === "guess") {
     const id = data.from;
@@ -894,6 +882,33 @@ function lerpAngle(a, b, t) {
   return a + d * t;
 }
 
+function pushMatePose(id, data) {
+  const seq = data.seq ?? 0;
+  let track = mp.poses.get(id);
+  if (!track) {
+    track = { seq: -1, samples: [], clockOff: null };
+    mp.poses.set(id, track);
+  }
+  if (seq && seq <= track.seq) return;
+  track.seq = seq || track.seq;
+  const localNow = performance.now();
+  const senderT = typeof data.t === "number" ? data.t : localNow;
+  if (track.clockOff == null) track.clockOff = localNow - senderT;
+  else track.clockOff += (localNow - senderT - track.clockOff) * 0.08;
+  const last = track.samples[track.samples.length - 1];
+  const t = Math.max(senderT + track.clockOff, last ? last.t + 1 : 0);
+  track.samples.push({
+    t,
+    lat: data.lat,
+    lon: data.lon,
+    h: data.h,
+    heading: data.heading,
+    pitch: data.pitch,
+    roll: data.roll,
+  });
+  if (track.samples.length > 16) track.samples.splice(0, track.samples.length - 16);
+}
+
 function offsetByIndex(lat, lon, index, total) {
   if (total <= 1) return { lat, lon };
   const spacingM = 20;
@@ -922,6 +937,7 @@ async function startMpFlight(msg) {
   mp.active = true;
   mp.guesses.clear();
   mp.poses.clear();
+  mp.poseSeq = 0;
   mp.truth = { lat: msg.lat, lon: msg.lon };
   mp.seats = msg.seats || {};
   mp.snapped = new Set();
@@ -1748,9 +1764,12 @@ function animate() {
     const now = performance.now();
     if (now - mp.lastPoseAt > 50) {
       mp.lastPoseAt = now;
+      mp.poseSeq += 1;
       mp.net?.send({
         t: "pose",
         from: mp.myId,
+        seq: mp.poseSeq,
+        t: now,
         lat: plane.latDeg,
         lon: plane.lonDeg,
         h: plane.height,
@@ -1762,26 +1781,40 @@ function animate() {
     }
   }
   if (mp.active && mp.inRound && !menuOpen) {
+    const renderAt = performance.now() - MATE_INTERP_MS;
     const deg = Math.PI / 180;
-    const follow = 1 - Math.exp(-14 * dt);
-    for (const [id, pose] of mp.poses) {
+    for (const [id, track] of mp.poses) {
       const mate = mp.mates.get(id);
-      if (!mate?.mesh) continue;
-      pose.showLat += (pose.lat - pose.showLat) * follow;
-      pose.showLon += (pose.lon - pose.showLon) * follow;
-      pose.showH += (pose.h - pose.showH) * follow;
-      pose.showHeading = lerpAngle(pose.showHeading, pose.heading, follow);
-      pose.showPitch += (pose.pitch - pose.showPitch) * follow;
-      pose.showRoll += (pose.roll - pose.showRoll) * follow;
+      const samples = track.samples;
+      if (!mate?.mesh || !samples.length) continue;
+      let from = samples[0];
+      let to = samples[samples.length - 1];
+      let u = 1;
+      if (renderAt <= samples[0].t) {
+        to = from;
+        u = 0;
+      } else if (renderAt >= to.t) {
+        from = to;
+        u = 1;
+      } else {
+        for (let i = 1; i < samples.length; i++) {
+          if (samples[i].t >= renderAt) {
+            from = samples[i - 1];
+            to = samples[i];
+            u = (renderAt - from.t) / Math.max(1, to.t - from.t);
+            break;
+          }
+        }
+      }
       const mm = frameAt(
-        pose.showLat * deg,
-        pose.showLon * deg,
-        pose.showH,
-        pose.showHeading,
-        pose.showPitch,
-        -pose.showRoll
+        (from.lat + (to.lat - from.lat) * u) * deg,
+        (from.lon + (to.lon - from.lon) * u) * deg,
+        from.h + (to.h - from.h) * u,
+        lerpAngle(from.heading, to.heading, u),
+        from.pitch + (to.pitch - from.pitch) * u,
+        -(from.roll + (to.roll - from.roll) * u)
       );
-      mm.decompose(matePos, mateQuat, mate.mesh.scale);
+      mm.decompose(matePos, mateQuat, mateScale);
       mate.mesh.position.copy(matePos);
       mate.mesh.quaternion.copy(mateQuat);
       mate.mesh.visible = true;
