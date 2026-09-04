@@ -45,7 +45,7 @@ import {
   primeAudio,
 } from "./game/explosion.js";
 import { updateEngineSound, engineDebug } from "./game/engineSound.js";
-import { musicDebug } from "./game/music.js";
+import { updateMusic, primeMusic, musicDebug } from "./game/music.js";
 
 // rakieta stoi pionowo (+Y) — połóż ją nosem do przodu (-Z, konwencja lotu)
 function prepareRocket(model) {
@@ -614,8 +614,15 @@ function finishSnapStart() {
   timerActive = mode !== "free";
 }
 
-el.start.addEventListener("click", () => {
+function unlockAudio() {
   primeAudio();
+  primeMusic();
+}
+window.addEventListener("pointerdown", unlockAudio);
+window.addEventListener("keydown", unlockAudio);
+
+el.start.addEventListener("click", () => {
+  unlockAudio();
   startGame();
 });
 el.city.addEventListener("keydown", (e) => {
@@ -783,6 +790,7 @@ function animate() {
     )
   );
   updateEngineSound(flying, rpm01, speed01, PLANES[selectedPlane].sound);
+  updateMusic();
 
   // pozycja i orientacja samolotu
   const m = frameAt(plane.lat, plane.lon, plane.height, plane.heading, plane.pitch, -plane.roll);
