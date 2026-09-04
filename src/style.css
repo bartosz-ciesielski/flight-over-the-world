@@ -470,6 +470,8 @@ kbd {
 }
 
 .player-row.ready .p-ready { color: var(--gold); }
+.player-row.waiting .p-ready { color: var(--muted); }
+.player-row.ingame .p-ready { color: #7ec8e3; }
 
 .player-row.empty {
   color: var(--muted);

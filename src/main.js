@@ -205,28 +205,29 @@ let geoCache = null;
 let beaconGrounded = false;
 const explosions = [];
 let shake = 0;
-let mateMesh = null;
-let mateKey = "";
 const matePos = new Vector3();
 const mateQuat = new Quaternion();
+const PLAYER_COLORS = ["#7ec8e3", "#e37e7e", "#9dce6a", "#d4a5f5", "#f0c36e", "#6ec8c1"];
 
 const mp = {
   active: false,
   host: false,
   roomId: "",
+  myId: "",
   net: null,
-  peerOn: false,
-  myReady: false,
-  theirReady: false,
-  theirName: "",
   myName: "Host",
-  theirPlane: "pa28",
-  pose: null,
-  myGuess: null,
-  theirGuess: null,
+  myReady: false,
+  myScore: 0,
+  waiting: false,
+  inRound: false,
+  roundActive: false,
+  players: new Map(),
+  guesses: new Map(),
+  poses: new Map(),
+  mates: new Map(),
+  seats: {},
   truth: null,
   lastPoseAt: 0,
-  score: { me: 0, them: 0 },
 };
 
 const ctrl = { roll: 0, pitch: 0, throttle: 0 };
@@ -318,7 +319,7 @@ function selectPlane(i, dir, silent = false) {
   el.lobbyCarName.textContent = spec.name;
   el.lobbyCarDesc.textContent = spec.desc;
   if (!silent && mp.active && mp.net) {
-    mp.net.send({ t: "plane", plane: selectedPlane });
+    mp.net.send({ t: "plane", plane: selectedPlane, from: mp.myId });
     renderLobby();
   }
 }
@@ -403,27 +404,146 @@ function setLobbyStatus(msg, isErr = false) {
   el.lobbyStatus.classList.toggle("err", isErr);
 }
 
+function otherPlayers() {
+  return [...mp.players.values()];
+}
+
+function playablePlayers() {
+  const list = [];
+  if (!mp.waiting) list.push({ id: mp.myId });
+  for (const p of mp.players.values()) if (!p.waiting) list.push(p);
+  return list;
+}
+
+function inRoundPlayers() {
+  const list = [];
+  if (mp.inRound) list.push({ id: mp.myId, name: mp.myName });
+  for (const p of mp.players.values()) if (p.inRound) list.push(p);
+  return list;
+}
+
+function playerColor(id) {
+  const ids = [mp.myId, ...mp.players.keys()];
+  const i = Math.max(0, ids.indexOf(id));
+  return PLAYER_COLORS[i % PLAYER_COLORS.length];
+}
+
+function playerName(id) {
+  if (id === mp.myId) return "Ty";
+  return mp.players.get(id)?.name || "Gracz";
+}
+
+function rosterPayload() {
+  return [
+    {
+      id: mp.myId,
+      name: mp.myName,
+      plane: selectedPlane,
+      ready: mp.myReady,
+      score: mp.myScore,
+      waiting: false,
+      inRound: mp.inRound,
+    },
+    ...otherPlayers().map((p) => ({
+      id: p.id,
+      name: p.name,
+      plane: p.plane,
+      ready: p.ready,
+      score: p.score,
+      waiting: !!p.waiting,
+      inRound: !!p.inRound,
+    })),
+  ];
+}
+
+function applyRoster(list = []) {
+  const keep = new Set();
+  for (const p of list) {
+    if (p.id === mp.myId) {
+      mp.myScore = p.score ?? mp.myScore;
+      mp.waiting = !!p.waiting;
+      mp.inRound = !!p.inRound;
+      continue;
+    }
+    keep.add(p.id);
+    const prev = mp.players.get(p.id) || {};
+    mp.players.set(p.id, { ...prev, ...p });
+  }
+  for (const id of [...mp.players.keys()]) {
+    if (!keep.has(id)) {
+      mp.players.delete(id);
+      disposeMate(id);
+    }
+  }
+}
+
+function broadcastRoster() {
+  if (!mp.host || !mp.net) return;
+  mp.net.send({
+    t: "roster",
+    players: rosterPayload(),
+    roundActive: mp.roundActive,
+    mode,
+    scope: guessScope,
+    city: el.lobbyCity.value,
+  });
+}
+
 function renderLobby() {
-  const rows = [];
-  rows.push(playerRow(mp.myName + " (Ty)", mp.myReady, selectedPlane));
-  if (mp.peerOn) rows.push(playerRow(mp.theirName || "Gość", mp.theirReady, mp.theirPlane));
-  else rows.push(`<div class="player-row empty">Czekam na drugiego gracza…</div>`);
+  const rows = [
+    playerRow({
+      name: mp.myName,
+      plane: selectedPlane,
+      ready: mp.myReady,
+      score: mp.myScore,
+      waiting: mp.waiting,
+      inRound: mp.inRound && mp.roundActive,
+    }, true),
+  ];
+  for (const p of otherPlayers()) rows.push(playerRow(p, false));
+  if (mp.players.size === 0) {
+    rows.push(`<div class="player-row empty">Czekam na graczy… wyślij link</div>`);
+  }
   el.lobbyPlayers.innerHTML = rows.join("");
   el.lobbyScopes.classList.toggle("locked", !mp.host);
   document.querySelector(".lobby-modes")?.classList.toggle("locked", !mp.host);
   el.lobbyCity.classList.toggle("locked", !mp.host);
   el.lobbyCity.readOnly = !mp.host;
   if (mp.roomId) el.lobbyLink.value = roomLink(mp.roomId);
-  el.lobbyStart.textContent = mp.myReady ? "Anuluj gotowość" : "Start";
-  if (!mp.peerOn) setLobbyStatus("Wyślij link znajomemu — oboje musicie nacisnąć Start");
-  else if (mp.myReady && mp.theirReady) setLobbyStatus("Startujemy…");
-  else if (mp.myReady) setLobbyStatus("Czekam aż drugi gracz naciśnie Start");
-  else setLobbyStatus("Oboje naciśnijcie Start, żeby lecieć razem");
+
+  const queued = mp.waiting || (mp.roundActive && !mp.inRound);
+  el.lobbyStart.disabled = queued;
+  el.lobbyStart.textContent = queued
+    ? "Poczekaj na rundę"
+    : mp.myReady
+      ? "Anuluj gotowość"
+      : "Start";
+
+  const playable = playablePlayers().length;
+  const readyN = (mp.myReady && !mp.waiting ? 1 : 0) + otherPlayers().filter((p) => !p.waiting && p.ready).length;
+  if (queued) setLobbyStatus("Runda w toku — dołączysz w następnej turze");
+  else if (playable < 2) setLobbyStatus("Wyślij link znajomym — wszyscy w pokoju muszą nacisnąć Start");
+  else if (mp.myReady && readyN === playable) setLobbyStatus("Startujemy…");
+  else if (mp.myReady) setLobbyStatus(`Czekam aż wszyscy naciśną Start (${readyN}/${playable})`);
+  else setLobbyStatus(`Wszyscy naciśnijcie Start (${playable} graczy)`);
 }
 
-function playerRow(name, ready, planeKey) {
-  const plane = PLANES[planeKey]?.name || "";
-  return `<div class="player-row${ready ? " ready" : ""}"><div class="p-meta"><span>${name}</span><span class="p-plane">${plane}</span></div><span class="p-ready">${ready ? "GOTOWY" : "CZEKA"}</span></div>`;
+function playerRow(p, isSelf) {
+  const plane = PLANES[p.plane]?.name || "";
+  const pts = p.score ? ` · ${p.score} pkt` : "";
+  let badge = "CZEKA";
+  let cls = "";
+  if (p.waiting) {
+    badge = "W KOLEJCE";
+    cls = " waiting";
+  } else if (p.inRound) {
+    badge = "W GRZE";
+    cls = " ingame";
+  } else if (p.ready) {
+    badge = "GOTOWY";
+    cls = " ready";
+  }
+  return `<div class="player-row${cls}"><div class="p-meta"><span>${p.name}${isSelf ? " (Ty)" : ""}</span><span class="p-plane">${plane}${pts}</span></div><span class="p-ready">${badge}</span></div>`;
 }
 
 function applyLobbySetup() {
@@ -441,7 +561,9 @@ function selectLobbyMode(m, broadcast = false) {
   applyLobbySetup();
   if (broadcast && mp.host && mp.net) {
     mp.myReady = false;
+    for (const p of mp.players.values()) p.ready = false;
     mp.net.send({ t: "mode", mode: m, city: el.lobbyCity.value, scope: guessScope });
+    broadcastRoster();
   }
   renderLobby();
 }
@@ -450,32 +572,55 @@ function attachNet(api) {
   mp.net = api;
 }
 
-function handleNetData(data) {
+function handleNetData(data, fromId) {
   if (!data || !data.t) return;
+  if (mp.host && fromId) {
+    data = { ...data, from: fromId };
+    if (data.t !== "hello") mp.net.sendExcept(fromId, data);
+  }
+
   if (data.t === "hello") {
-    mp.theirName = data.name || "Gość";
-    mp.theirPlane = data.plane || "pa28";
-    if (mp.host) {
-      mp.net?.send({
-        t: "welcome",
-        name: mp.myName,
-        plane: selectedPlane,
-        scope: guessScope,
-        mode,
-        city: el.lobbyCity.value,
-        ready: mp.myReady,
-        score: mp.score,
-      });
-    }
+    if (!mp.host || !fromId) return;
+    const waiting = mp.roundActive;
+    const name = `Gość ${mp.players.size + 1}`;
+    mp.players.set(fromId, {
+      id: fromId,
+      name,
+      plane: data.plane || "pa28",
+      ready: false,
+      score: 0,
+      waiting,
+      inRound: false,
+    });
+    mp.net.sendTo(fromId, {
+      t: "welcome",
+      id: fromId,
+      name,
+      roster: rosterPayload(),
+      roundActive: mp.roundActive,
+      mode,
+      scope: guessScope,
+      city: el.lobbyCity.value,
+    });
+    broadcastRoster();
     renderLobby();
   } else if (data.t === "welcome") {
-    mp.theirName = data.name || "Host";
-    mp.theirPlane = data.plane || "pa28";
-    mp.theirReady = !!data.ready;
+    if (data.id) mp.myId = data.id;
+    if (data.name) mp.myName = data.name;
+    mp.roundActive = !!data.roundActive;
+    mp.waiting = !!data.roundActive;
     if (data.scope) setLobbyScope(data.scope);
     if (data.mode) selectLobbyMode(data.mode);
     if (data.city != null) el.lobbyCity.value = data.city;
-    if (data.score) mp.score = { me: data.score.them ?? 0, them: data.score.me ?? 0 };
+    applyRoster(data.roster);
+    applyLobbySetup();
+    renderLobby();
+  } else if (data.t === "roster") {
+    mp.roundActive = !!data.roundActive;
+    if (data.scope) setLobbyScope(data.scope);
+    if (data.mode) selectLobbyMode(data.mode);
+    if (data.city != null) el.lobbyCity.value = data.city;
+    applyRoster(data.players);
     applyLobbySetup();
     renderLobby();
   } else if (data.t === "scope") {
@@ -484,49 +629,78 @@ function handleNetData(data) {
     if (data.scope) setLobbyScope(data.scope);
     if (data.city != null) el.lobbyCity.value = data.city;
     mp.myReady = false;
-    mp.theirReady = false;
+    for (const p of mp.players.values()) p.ready = false;
     selectLobbyMode(data.mode);
   } else if (data.t === "city") {
     el.lobbyCity.value = data.city || "";
   } else if (data.t === "plane") {
-    mp.theirPlane = data.plane || "pa28";
+    const id = data.from;
+    if (id && mp.players.has(id)) mp.players.get(id).plane = data.plane || "pa28";
     renderLobby();
   } else if (data.t === "ready") {
-    mp.theirReady = !!data.ready;
+    const id = data.from;
+    if (id && mp.players.has(id)) mp.players.get(id).ready = !!data.ready;
     renderLobby();
     tryStartMp();
   } else if (data.t === "start") {
+    if (data.seats && mp.myId && !data.seats[mp.myId]) {
+      mp.roundActive = true;
+      mp.waiting = true;
+      mp.inRound = false;
+      renderLobby();
+      return;
+    }
     startMpFlight(data);
   } else if (data.t === "pose") {
-    mp.pose = data;
-    if (data.plane && data.plane !== mateKey) loadMatePlane(data.plane);
+    const id = data.from;
+    if (!id || id === mp.myId) return;
+    mp.poses.set(id, data);
+    if (data.plane) loadMate(id, data.plane);
   } else if (data.t === "guess") {
-    mp.theirGuess = { lat: data.lat, lon: data.lon };
-    if (mp.myGuess) revealMpGuesses();
-    else if (guessOpen) el.gmResult.textContent = "Rywal zaznaczył — teraz Twoja kolej";
+    const id = data.from;
+    if (!id || id === mp.myId) return;
+    mp.guesses.set(id, { lat: data.lat, lon: data.lon });
+    if (guessOpen) maybeRevealGuesses();
+  } else if (data.t === "done") {
+    const id = data.from;
+    if (id && mp.players.has(id)) mp.players.get(id).inRound = false;
+    if (mp.host) checkRoundClear();
+    renderLobby();
+  } else if (data.t === "roundEnd") {
+    finishRoomRound();
+    renderLobby();
   }
 }
 
 function handlePeerJoined() {
-  mp.peerOn = true;
+  if (mp.host) return;
   mp.net?.send({ t: "hello", name: mp.myName, plane: selectedPlane });
-  renderLobby();
 }
 
-function handlePeerLeft() {
-  mp.peerOn = false;
-  mp.theirReady = false;
-  mp.theirName = "";
-  mp.pose = null;
-  if (mateMesh) mateMesh.visible = false;
-  if (mp.active && !menuOpen) {
-    hideBanner();
-    backToLobby();
-    setLobbyStatus("Drugi gracz wyszedł z pokoju", true);
-  } else {
-    renderLobby();
-    setLobbyStatus("Drugi gracz wyszedł z pokoju", true);
+function handlePeerLeft(peerId) {
+  if (!peerId) {
+    disposeAllMates();
+    mp.players.clear();
+    mp.roundActive = false;
+    mp.inRound = false;
+    mp.waiting = false;
+    if (!menuOpen) backToLobby();
+    else renderLobby();
+    setLobbyStatus("Host wyszedł — pokój się zamknął", true);
+    return;
   }
+  const gone = mp.players.get(peerId);
+  mp.players.delete(peerId);
+  mp.poses.delete(peerId);
+  mp.guesses.delete(peerId);
+  disposeMate(peerId);
+  if (mp.host) {
+    checkRoundClear();
+    broadcastRoster();
+  }
+  if (guessOpen) maybeRevealGuesses();
+  renderLobby();
+  if (gone) setLobbyStatus(`${gone.name} wyszedł z pokoju`);
 }
 
 function handleNetError(err) {
@@ -541,15 +715,19 @@ function handleNetError(err) {
 function closeRoom() {
   mp.net?.destroy();
   mp.net = null;
-  mp.peerOn = false;
   mp.roomId = "";
+  mp.myId = "";
   mp.host = false;
   mp.myReady = false;
-  mp.theirReady = false;
-  mp.theirName = "";
-  mp.pose = null;
-  mp.score = { me: 0, them: 0 };
-  if (mateMesh) mateMesh.visible = false;
+  mp.myScore = 0;
+  mp.waiting = false;
+  mp.inRound = false;
+  mp.roundActive = false;
+  mp.players.clear();
+  mp.guesses.clear();
+  mp.poses.clear();
+  mp.seats = {};
+  disposeAllMates();
 }
 
 function openHostLobby() {
@@ -557,13 +735,13 @@ function openHostLobby() {
   mp.active = true;
   mp.host = true;
   mp.myName = "Host";
-  mp.score = { me: 0, them: 0 };
   selectLobbyMode("guess");
   showLobby();
   setLobbyStatus("Tworzę pokój…");
   const api = hostRoom({
     onOpen(id) {
       mp.roomId = id;
+      mp.myId = id;
       history.replaceState(null, "", `#r=${id}`);
       el.lobbyLink.value = roomLink(id);
       renderLobby();
@@ -582,13 +760,13 @@ function openGuestLobby(id) {
   mp.host = false;
   mp.myName = "Gość";
   mp.roomId = id;
-  mp.score = { me: 0, them: 0 };
   showLobby();
   el.lobbyLink.value = roomLink(id);
   setLobbyStatus("Łączę z pokojem…");
   history.replaceState(null, "", `#r=${id}`);
   const api = joinRoom(id, {
-    onOpen() {
+    onOpen(_hostId, myId) {
+      if (myId) mp.myId = myId;
       renderLobby();
     },
     onPeer: handlePeerJoined,
@@ -600,7 +778,10 @@ function openGuestLobby(id) {
 }
 
 function tryStartMp() {
-  if (mp.host && mp.myReady && mp.theirReady && mp.peerOn) launchMpRound();
+  if (!mp.host || !mp.myReady || mp.roundActive) return;
+  const others = otherPlayers().filter((p) => !p.waiting);
+  if (!others.length || others.some((p) => !p.ready)) return;
+  launchMpRound();
 }
 
 async function launchMpRound() {
@@ -611,7 +792,7 @@ async function launchMpRound() {
       setLobbyStatus(scope.status);
       geoCache = await scope.load();
       const p = scope.random(geoCache);
-      const msg = { t: "start", mode, lat: p.lat, lon: p.lon, scope: guessScope };
+      const msg = { t: "start", mode, lat: p.lat, lon: p.lon, scope: guessScope, seats: buildSeats() };
       mp.net?.send(msg);
       startMpFlight(msg);
     } else if (mode === "home") {
@@ -636,6 +817,7 @@ async function launchMpRound() {
         lon: start.lon,
         homeLat: loc.lat,
         homeLon: loc.lon,
+        seats: buildSeats(),
       };
       mp.net?.send(msg);
       startMpFlight(msg);
@@ -648,7 +830,7 @@ async function launchMpRound() {
         el.lobbyStart.disabled = false;
         return;
       }
-      const msg = { t: "start", mode, lat: loc.lat, lon: loc.lon };
+      const msg = { t: "start", mode, lat: loc.lat, lon: loc.lon, seats: buildSeats() };
       mp.net?.send(msg);
       startMpFlight(msg);
     }
@@ -658,16 +840,49 @@ async function launchMpRound() {
   }
 }
 
+function buildSeats() {
+  const seats = {};
+  let i = 0;
+  seats[mp.myId] = i++;
+  for (const p of otherPlayers()) {
+    if (!p.waiting) seats[p.id] = i++;
+  }
+  return seats;
+}
+
+function offsetByIndex(lat, lon, index, total) {
+  if (!index || total <= 1) return { lat, lon };
+  const brg = (index / total) * Math.PI * 2;
+  const distM = 90;
+  const R = 6378137;
+  const dN = Math.cos(brg) * distM;
+  const dE = Math.sin(brg) * distM;
+  return {
+    lat: lat + (dN / R) * (180 / Math.PI),
+    lon: lon + (dE / (R * Math.cos((lat * Math.PI) / 180))) * (180 / Math.PI),
+  };
+}
+
+function markRoundStarted(seats) {
+  mp.roundActive = true;
+  mp.inRound = !!(seats && seats[mp.myId] != null);
+  mp.waiting = !mp.inRound;
+  mp.myReady = false;
+  for (const p of mp.players.values()) {
+    p.ready = false;
+    p.inRound = !!(seats && seats[p.id] != null);
+  }
+}
+
 async function startMpFlight(msg) {
   mode = msg.mode || "guess";
   guessScope = msg.scope || guessScope;
   mp.active = true;
-  mp.myGuess = null;
-  mp.theirGuess = null;
+  mp.guesses.clear();
+  mp.poses.clear();
   mp.truth = { lat: msg.lat, lon: msg.lon };
-  mp.myReady = false;
-  mp.theirReady = false;
-  mp.pose = null;
+  mp.seats = msg.seats || {};
+  markRoundStarted(mp.seats);
   homeTarget = msg.homeLat != null ? { lat: msg.homeLat, lon: msg.homeLon } : null;
   timeLeft = mode === "guess" ? GUESS_TIME : mode === "home" ? HOME_TIME : 0;
   timerActive = false;
@@ -681,11 +896,47 @@ async function startMpFlight(msg) {
       return;
     }
   }
-  const spawn = mp.host ? { lat: msg.lat, lon: msg.lon } : offsetPoint(msg.lat, msg.lon, 0.08);
+  const seat = mp.seats[mp.myId] ?? 0;
+  const total = Object.keys(mp.seats).length || 1;
+  const spawn = offsetByIndex(msg.lat, msg.lon, seat, total);
   if (selectedPlane !== planeMesh?.userData?.key) loadPlane(selectedPlane);
-  loadMatePlane(mp.theirPlane || "pa28");
+  for (const p of otherPlayers()) {
+    if (p.inRound) loadMate(p.id, p.plane || "pa28");
+  }
   beginFlight(spawn.lat, spawn.lon);
   if (mode === "home" && homeTarget) placeBeaconAt(homeTarget.lat, homeTarget.lon);
+  if (mp.host) broadcastRoster();
+}
+
+function leaveRound() {
+  const wasIn = mp.inRound;
+  mp.inRound = false;
+  mp.myReady = false;
+  if (wasIn) mp.net?.send({ t: "done", from: mp.myId });
+  if (mp.host) checkRoundClear();
+}
+
+function checkRoundClear() {
+  if (!mp.host) return;
+  if (mp.inRound || otherPlayers().some((p) => p.inRound)) return;
+  finishRoomRound();
+  mp.net?.send({ t: "roundEnd" });
+  broadcastRoster();
+}
+
+function finishRoomRound() {
+  mp.roundActive = false;
+  mp.inRound = false;
+  mp.waiting = false;
+  mp.myReady = false;
+  for (const p of mp.players.values()) {
+    p.waiting = false;
+    p.inRound = false;
+    p.ready = false;
+  }
+  mp.guesses.clear();
+  mp.poses.clear();
+  hideAllMates();
 }
 
 function backToLobby() {
@@ -698,11 +949,7 @@ function backToLobby() {
   finished = false;
   beacon.visible = false;
   el.guessmap.classList.remove("show");
-  mp.myReady = false;
-  mp.theirReady = false;
-  mp.myGuess = null;
-  mp.theirGuess = null;
-  if (mateMesh) mateMesh.visible = false;
+  leaveRound();
   if (planeMesh) planeMesh.visible = true;
   showLobby();
 }
@@ -873,18 +1120,35 @@ function loadPlane(key) {
   });
 }
 
-function loadMatePlane(key) {
-  if (!key || !PLANES[key] || !scene) return;
-  if (mateMesh && mateKey === key) return;
-  mateKey = key;
+function disposeMate(id) {
+  const mate = mp.mates.get(id);
+  if (mate?.mesh && scene) scene.remove(mate.mesh);
+  mp.mates.delete(id);
+}
+
+function disposeAllMates() {
+  for (const id of [...mp.mates.keys()]) disposeMate(id);
+}
+
+function hideAllMates() {
+  for (const mate of mp.mates.values()) {
+    if (mate.mesh) mate.mesh.visible = false;
+  }
+}
+
+function loadMate(id, key) {
+  if (!id || !key || !PLANES[key] || !scene) return;
+  const prev = mp.mates.get(id);
+  if (prev?.key === key && prev.mesh) return;
+  disposeMate(id);
   const spec = PLANES[key];
-  if (mateMesh) scene.remove(mateMesh);
-  mateMesh = createPlaneMesh();
-  mateMesh.userData.key = key;
-  mateMesh.visible = false;
-  scene.add(mateMesh);
+  const placeholder = createPlaneMesh();
+  placeholder.visible = false;
+  scene.add(placeholder);
+  mp.mates.set(id, { mesh: placeholder, key });
   new GLTFLoader().load(spec.file, (gltf) => {
-    if (mateKey !== key) return;
+    const cur = mp.mates.get(id);
+    if (!cur || cur.key !== key) return;
     const model = gltf.scene;
     if (spec.prepare) spec.prepare(model);
     const box = new Box3().setFromObject(model);
@@ -902,10 +1166,10 @@ function loadMatePlane(key) {
     const wrapper = new Group();
     wrapper.add(model);
     wrapper.userData.key = key;
-    scene.remove(mateMesh);
-    mateMesh = wrapper;
-    mateMesh.visible = mp.active && !menuOpen && !!mp.pose;
-    scene.add(mateMesh);
+    wrapper.visible = cur.mesh.visible;
+    scene.remove(cur.mesh);
+    scene.add(wrapper);
+    mp.mates.set(id, { mesh: wrapper, key });
   });
 }
 
@@ -1127,12 +1391,16 @@ el.lobbyCopy.addEventListener("click", async () => {
 });
 el.lobbyStart.addEventListener("click", () => {
   unlockAudio();
-  if (!mp.peerOn) {
+  if (mp.waiting || (mp.roundActive && !mp.inRound)) {
+    setLobbyStatus("Runda w toku — dołączysz w następnej turze");
+    return;
+  }
+  if (playablePlayers().length < 2) {
     setLobbyStatus("Najpierw poczekaj, aż ktoś wejdzie z linku", true);
     return;
   }
   mp.myReady = !mp.myReady;
-  mp.net?.send({ t: "ready", ready: mp.myReady });
+  mp.net?.send({ t: "ready", ready: mp.myReady, from: mp.myId });
   renderLobby();
   tryStartMp();
 });
@@ -1191,30 +1459,53 @@ function openGuessMap() {
   requestAnimationFrame(() => drawGuessMap());
 }
 
-function revealMpGuesses() {
-  if (!mp.myGuess || !mp.theirGuess || !mp.truth || guessAnswered) return;
-  guessAnswered = true;
-  const myErr = distanceM(mp.myGuess.lat, mp.myGuess.lon, mp.truth.lat, mp.truth.lon) / 1000;
-  const theirErr = distanceM(mp.theirGuess.lat, mp.theirGuess.lon, mp.truth.lat, mp.truth.lon) / 1000;
-  drawGuessMap([
-    { lat: mp.truth.lat, lon: mp.truth.lon, color: "#d8a24a", label: "Tu byliście", truth: true },
-    { lat: mp.myGuess.lat, lon: mp.myGuess.lon, color: "#7ec8e3", label: "Ty" },
-    { lat: mp.theirGuess.lat, lon: mp.theirGuess.lon, color: "#e37e7e", label: mp.theirName || "Rywal" },
-  ]);
-  const draw = Math.abs(myErr - theirErr) < 0.5;
-  const win = myErr < theirErr;
-  if (!draw) {
-    if (win) mp.score.me += 1;
-    else mp.score.them += 1;
+function maybeRevealGuesses() {
+  const need = inRoundPlayers().length;
+  if (!need || mp.guesses.size < need) {
+    if (guessOpen) {
+      el.gmResult.textContent = `Czekam na zaznaczenia… ${mp.guesses.size}/${need}`;
+    }
+    return;
   }
-  const them = mp.theirName || "Rywal";
-  el.gmResult.textContent = draw
-    ? `Remis — Ty ${Math.round(myErr)} km · ${them} ${Math.round(theirErr)} km  (${mp.score.me}–${mp.score.them})`
-    : win
-      ? `Wygrywasz! Ty ${Math.round(myErr)} km · ${them} ${Math.round(theirErr)} km  (${mp.score.me}–${mp.score.them})`
-      : `Przegrywasz — Ty ${Math.round(myErr)} km · ${them} ${Math.round(theirErr)} km  (${mp.score.me}–${mp.score.them})`;
+  revealMpGuesses();
+}
+
+function revealMpGuesses() {
+  if (!mp.truth || guessAnswered) return;
+  if (mp.guesses.size < inRoundPlayers().length) return;
+  guessAnswered = true;
+  const marks = [
+    { lat: mp.truth.lat, lon: mp.truth.lon, color: "#d8a24a", label: "Tu byliście", truth: true },
+  ];
+  const results = [];
+  for (const [id, g] of mp.guesses) {
+    const err = distanceM(g.lat, g.lon, mp.truth.lat, mp.truth.lon) / 1000;
+    results.push({ id, err, name: playerName(id) });
+    marks.push({ lat: g.lat, lon: g.lon, color: playerColor(id), label: playerName(id) });
+  }
+  drawGuessMap(marks);
+  results.sort((a, b) => a.err - b.err);
+  const best = results[0]?.err ?? 0;
+  const winners = results.filter((r) => r.err - best < 0.5);
+  if (winners.length === 1) {
+    const w = winners[0];
+    if (w.id === mp.myId) mp.myScore += 1;
+    else if (mp.players.has(w.id)) mp.players.get(w.id).score += 1;
+  }
+  const line = results.map((r) => `${r.name} ${Math.round(r.err)} km`).join(" · ");
+  const scoreboard = [mp.myName, ...otherPlayers().map((p) => p.name)]
+    .map((n, i) => {
+      const pts = i === 0 ? mp.myScore : otherPlayers()[i - 1].score;
+      return `${n} ${pts}`;
+    })
+    .join("–");
+  el.gmResult.textContent =
+    winners.length > 1
+      ? `Remis — ${line}  (${scoreboard})`
+      : `Wygrywa ${winners[0]?.name} — ${line}  (${scoreboard})`;
   el.gmClose.style.display = "";
   el.gmRetry.style.display = "";
+  if (mp.host) broadcastRoster();
 }
 
 el.gmCanvas.addEventListener("click", (e) => {
@@ -1227,14 +1518,17 @@ el.gmCanvas.addEventListener("click", (e) => {
     rect.height
   );
   if (mp.active) {
-    if (mp.myGuess) return;
-    mp.myGuess = { lat, lon };
-    mp.net?.send({ t: "guess", lat, lon });
-    drawGuessMap([
-      { lat, lon, color: "#7ec8e3", label: "Ty" },
-    ]);
-    if (mp.theirGuess) revealMpGuesses();
-    else el.gmResult.textContent = "Czekam na zaznaczenie rywala…";
+    if (mp.guesses.has(mp.myId)) return;
+    mp.guesses.set(mp.myId, { lat, lon });
+    mp.net?.send({ t: "guess", lat, lon, from: mp.myId });
+    const marks = [...mp.guesses].map(([id, g]) => ({
+      lat: g.lat,
+      lon: g.lon,
+      color: playerColor(id),
+      label: playerName(id),
+    }));
+    drawGuessMap(marks);
+    maybeRevealGuesses();
     return;
   }
   const errKm = distanceM(lat, lon, plane.latDeg, plane.lonDeg) / 1000;
@@ -1377,12 +1671,13 @@ function animate() {
     planeMesh.userData.prop.rotation.z += plane.speed * dt * 1.6;
   }
 
-  if (mp.active && mp.peerOn && !menuOpen && !guessOpen && !crashed) {
+  if (mp.active && mp.inRound && !menuOpen && !guessOpen && !crashed) {
     const now = performance.now();
     if (now - mp.lastPoseAt > 100) {
       mp.lastPoseAt = now;
       mp.net?.send({
         t: "pose",
+        from: mp.myId,
         lat: plane.latDeg,
         lon: plane.lonDeg,
         h: plane.height,
@@ -1393,22 +1688,26 @@ function animate() {
       });
     }
   }
-  if (mateMesh && mp.pose && mp.active && !menuOpen) {
+  if (mp.active && mp.inRound && !menuOpen) {
     const deg = Math.PI / 180;
-    const mm = frameAt(
-      mp.pose.lat * deg,
-      mp.pose.lon * deg,
-      mp.pose.h,
-      mp.pose.heading,
-      mp.pose.pitch,
-      -mp.pose.roll
-    );
-    mm.decompose(matePos, mateQuat, mateMesh.scale);
-    mateMesh.position.copy(matePos);
-    mateMesh.quaternion.copy(mateQuat);
-    mateMesh.visible = true;
-  } else if (mateMesh) {
-    mateMesh.visible = false;
+    for (const [id, pose] of mp.poses) {
+      const mate = mp.mates.get(id);
+      if (!mate?.mesh) continue;
+      const mm = frameAt(
+        pose.lat * deg,
+        pose.lon * deg,
+        pose.h,
+        pose.heading,
+        pose.pitch,
+        -pose.roll
+      );
+      mm.decompose(matePos, mateQuat, mate.mesh.scale);
+      mate.mesh.position.copy(matePos);
+      mate.mesh.quaternion.copy(mateQuat);
+      mate.mesh.visible = true;
+    }
+  } else {
+    hideAllMates();
   }
 
   // sztywna kamera za samolotem — tylko kurs, bez przechyłu/pochylenia

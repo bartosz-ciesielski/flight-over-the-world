@@ -25,16 +25,32 @@ export function roomLink(id) {
 export function hostRoom(handlers) {
   const id = roomId();
   const peer = makePeer(id);
-  let conn = null;
+  const conns = new Map();
+
+  function each(fn, exceptId) {
+    for (const [pid, c] of conns) {
+      if (exceptId && pid === exceptId) continue;
+      if (c.open) fn(c, pid);
+    }
+  }
 
   const api = {
     id,
     host: true,
+    myPeerId: id,
     send(data) {
-      if (conn?.open) conn.send(data);
+      each((c) => c.send(data));
+    },
+    sendTo(peerId, data) {
+      const c = conns.get(peerId);
+      if (c?.open) c.send(data);
+    },
+    sendExcept(peerId, data) {
+      each((c) => c.send(data), peerId);
     },
     destroy() {
-      conn?.close();
+      for (const c of conns.values()) c.close();
+      conns.clear();
       peer.destroy();
     },
   };
@@ -42,10 +58,13 @@ export function hostRoom(handlers) {
   peer.on("open", () => handlers.onOpen?.(id));
   peer.on("error", (err) => handlers.onError?.(err));
   peer.on("connection", (c) => {
-    conn = c;
-    c.on("open", () => handlers.onPeer?.());
-    c.on("data", (data) => handlers.onData?.(data));
-    c.on("close", () => handlers.onLeft?.());
+    conns.set(c.peer, c);
+    c.on("open", () => handlers.onPeer?.(c.peer));
+    c.on("data", (data) => handlers.onData?.(data, c.peer));
+    c.on("close", () => {
+      conns.delete(c.peer);
+      handlers.onLeft?.(c.peer);
+    });
     c.on("error", (err) => handlers.onError?.(err));
   });
 
@@ -59,9 +78,12 @@ export function joinRoom(hostId, handlers) {
   const api = {
     id: hostId,
     host: false,
+    myPeerId: "",
     send(data) {
       if (conn?.open) conn.send(data);
     },
+    sendTo() {},
+    sendExcept() {},
     destroy() {
       conn?.close();
       peer.destroy();
@@ -69,10 +91,11 @@ export function joinRoom(hostId, handlers) {
   };
 
   peer.on("error", (err) => handlers.onError?.(err));
-  peer.on("open", () => {
+  peer.on("open", (myId) => {
+    api.myPeerId = myId;
     conn = peer.connect(hostId, { reliable: true });
     conn.on("open", () => {
-      handlers.onOpen?.(hostId);
+      handlers.onOpen?.(hostId, myId);
       handlers.onPeer?.();
     });
     conn.on("data", (data) => handlers.onData?.(data));
