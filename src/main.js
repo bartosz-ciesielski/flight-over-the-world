@@ -228,6 +228,9 @@ const mp = {
   poses: new Map(),
   mates: new Map(),
   seats: {},
+  snapped: new Set(),
+  goSent: false,
+  waitingGo: false,
   truth: null,
   lastPoseAt: 0,
 };
@@ -645,6 +648,13 @@ function handleNetData(data, fromId) {
     if (id && mp.players.has(id)) mp.players.get(id).ready = !!data.ready;
     renderLobby();
     tryStartMp();
+  } else if (data.t === "snapped") {
+    if (mp.host && data.from) {
+      mp.snapped.add(data.from);
+      tryReleaseGo();
+    }
+  } else if (data.t === "go") {
+    releaseGo();
   } else if (data.t === "start") {
     if (data.seats && mp.myId && !data.seats[mp.myId]) {
       mp.roundActive = true;
@@ -863,14 +873,12 @@ function buildSeats() {
 }
 
 function offsetByIndex(lat, lon, index, total) {
-  if (!index || total <= 1) return { lat, lon };
-  const brg = (index / total) * Math.PI * 2;
-  const distM = 90;
+  if (total <= 1) return { lat, lon };
+  const spacingM = 20;
+  const dE = (index - (total - 1) / 2) * spacingM;
   const R = 6378137;
-  const dN = Math.cos(brg) * distM;
-  const dE = Math.sin(brg) * distM;
   return {
-    lat: lat + (dN / R) * (180 / Math.PI),
+    lat,
     lon: lon + (dE / (R * Math.cos((lat * Math.PI) / 180))) * (180 / Math.PI),
   };
 }
@@ -894,19 +902,17 @@ async function startMpFlight(msg) {
   mp.poses.clear();
   mp.truth = { lat: msg.lat, lon: msg.lon };
   mp.seats = msg.seats || {};
+  mp.snapped = new Set();
+  mp.goSent = false;
+  mp.waitingGo = false;
   markRoundStarted(mp.seats);
   homeTarget = msg.homeLat != null ? { lat: msg.homeLat, lon: msg.homeLon } : null;
   timeLeft = mode === "guess" ? GUESS_TIME : mode === "home" ? HOME_TIME : 0;
   timerActive = false;
   el.lobbyStart.disabled = false;
-  setLobbyStatus("Ładowanie terenu…");
+  setLobbyStatus("Ładowanie terenu… czekam na wszystkich");
   if (mode === "guess" && !geoCache) {
-    try {
-      geoCache = await GUESS_SCOPES[guessScope].load();
-    } catch {
-      setLobbyStatus("Nie udało się wczytać mapy", true);
-      return;
-    }
+    GUESS_SCOPES[guessScope].load().then((g) => { geoCache = g; }).catch(() => {});
   }
   const seat = mp.seats[mp.myId] ?? 0;
   const total = Object.keys(mp.seats).length || 1;
@@ -917,7 +923,37 @@ async function startMpFlight(msg) {
   }
   beginFlight(spawn.lat, spawn.lon);
   if (mode === "home" && homeTarget) placeBeaconAt(homeTarget.lat, homeTarget.lon);
-  if (mp.host) broadcastRoster();
+  if (mp.host) {
+    broadcastRoster();
+    setTimeout(() => {
+      if (mp.host && mp.roundActive && !mp.goSent) releaseGo();
+    }, 10000);
+  }
+}
+
+function reportSnapped() {
+  if (!mp.active || !mp.inRound || mp.goSent || mp.waitingGo) return;
+  mp.waitingGo = true;
+  setLobbyStatus("Czekam aż wszyscy będą gotowi…");
+  mp.net?.send({ t: "snapped", from: mp.myId });
+  if (mp.host) {
+    mp.snapped.add(mp.myId);
+    tryReleaseGo();
+  }
+}
+
+function tryReleaseGo() {
+  if (!mp.host || mp.goSent) return;
+  const need = Object.keys(mp.seats || {});
+  if (need.length && need.every((id) => mp.snapped.has(id))) releaseGo();
+}
+
+function releaseGo() {
+  if (mp.goSent) return;
+  mp.goSent = true;
+  mp.waitingGo = false;
+  if (mp.host) mp.net?.send({ t: "go" });
+  finishSnapStart();
 }
 
 function leaveRound() {
@@ -1797,7 +1833,8 @@ function animate() {
           pendingSnap = false;
           if (awaitingSnap) {
             awaitingSnap = false;
-            finishSnapStart();
+            if (mp.active && mp.inRound) reportSnapped();
+            else finishSnapStart();
           }
         }
       }
@@ -1807,7 +1844,8 @@ function animate() {
   if (awaitingSnap && performance.now() - awaitingSnapSince > 15000) {
     awaitingSnap = false;
     pendingSnap = false;
-    finishSnapStart();
+    if (mp.active && mp.inRound) reportSnapped();
+    else finishSnapStart();
   }
   const agl = plane.height - groundAlt;
   // bez kolizji podczas dosadzania — pomiar gruntu jeszcze się doprecyzowuje
