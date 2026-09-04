@@ -24,14 +24,8 @@
         <h1>Lot nad światem</h1>
         <p class="landing-sub">Wybierz tryb gry</p>
         <div class="landing-modes">
-          <button id="btn-solo" type="button">
-            <span class="m-name">Single player</span>
-            <span class="m-sub">Lecisz sam — swobodny lot, dom, zgadnij region</span>
-          </button>
-          <button id="btn-multi" type="button">
-            <span class="m-name">Multiplayer</span>
-            <span class="m-sub">Zaproś znajomego linkiem i zgadujcie region</span>
-          </button>
+          <button id="btn-solo" type="button">Single player</button>
+          <button id="btn-multi" type="button">Multiplayer</button>
         </div>
       </div>
     </div>
@@ -40,18 +34,35 @@
       <div class="menu-card lobby-card">
         <button id="lobby-back" class="back-btn" type="button">‹ Wstecz</button>
         <h1>Pokój</h1>
-        <p class="landing-sub">Zgadnij region — minuta lotu, potem mapa</p>
+        <p id="lobby-sub" class="landing-sub">Wybierz tryb i samolot</p>
+        <div class="carousel lobby-carousel">
+          <button id="lobby-car-prev" type="button" aria-label="Poprzedni">‹</button>
+          <canvas id="lobby-carousel-canvas"></canvas>
+          <button id="lobby-car-next" type="button" aria-label="Następny">›</button>
+        </div>
+        <div class="car-info">
+          <span id="lobby-car-name">Piper PA-28</span>
+          <span id="lobby-car-desc">Lekki śmigłowiec – 170 km/h</span>
+        </div>
         <div class="modes lobby-modes">
-          <button class="mode-card selected" type="button" disabled>
+          <button class="mode-card selected" data-mode="guess" type="button">
             <span class="m-name">Zgadnij region</span>
           </button>
+          <button class="mode-card" data-mode="home" type="button">
+            <span class="m-name">Doleć do domu</span>
+          </button>
+          <button class="mode-card" data-mode="free" type="button">
+            <span class="m-name">Swobodny lot</span>
+          </button>
         </div>
-        <div id="lobby-scope" class="start-row" style="margin-bottom: 16px">
-          <div id="lobby-scopes" class="guess-scope-bar">
+        <p id="lobby-mode-desc"></p>
+        <div id="lobby-setup">
+          <div id="lobby-scopes">
             <button class="scope-btn selected" data-scope="pl" type="button">🇵🇱 Polska</button>
             <button class="scope-btn" data-scope="eu" type="button">🇪🇺 Europa</button>
             <button class="scope-btn" data-scope="world" type="button">🌍 Świat</button>
           </div>
+          <input id="lobby-city" type="text" placeholder="Miasto startowe… np. Niepruszewo" autocomplete="off" />
         </div>
         <div id="lobby-players" class="lobby-players"></div>
         <div class="lobby-link-row">

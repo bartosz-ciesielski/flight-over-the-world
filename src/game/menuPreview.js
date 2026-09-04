@@ -98,11 +98,13 @@ export function createCarousel(canvas, items) {
 
   return {
     show,
+    resize,
     get currentKey() {
       return currentKey;
     },
     setActive(v) {
       active = v;
+      if (v) resize();
     },
   };
 }

@@ -278,6 +278,14 @@ const el = {
   lobbyStart: document.getElementById("lobby-start"),
   lobbyStatus: document.getElementById("lobby-status"),
   lobbyScopes: document.getElementById("lobby-scopes"),
+  lobbySub: document.getElementById("lobby-sub"),
+  lobbyModeDesc: document.getElementById("lobby-mode-desc"),
+  lobbyCity: document.getElementById("lobby-city"),
+  lobbyCarCanvas: document.getElementById("lobby-carousel-canvas"),
+  lobbyCarPrev: document.getElementById("lobby-car-prev"),
+  lobbyCarNext: document.getElementById("lobby-car-next"),
+  lobbyCarName: document.getElementById("lobby-car-name"),
+  lobbyCarDesc: document.getElementById("lobby-car-desc"),
 };
 
 // karuzela pojazdów — jeden duży podgląd, strzałki w bok
@@ -290,18 +298,38 @@ const carousel = createCarousel(
     prepare: PLANES[k].prepare,
   }))
 );
+const lobbyCarousel = createCarousel(
+  el.lobbyCarCanvas,
+  PLANE_ORDER.map((k) => ({
+    key: k,
+    file: PLANES[k].file,
+    wingspan: PLANES[k].wingspan,
+    prepare: PLANES[k].prepare,
+  }))
+);
 let planeIdx = 0;
-function selectPlane(i, dir) {
+function selectPlane(i, dir, silent = false) {
   planeIdx = (i + PLANE_ORDER.length) % PLANE_ORDER.length;
   selectedPlane = PLANE_ORDER[planeIdx];
   carousel.show(selectedPlane, dir);
-  el.carName.textContent = PLANES[selectedPlane].name;
-  el.carDesc.textContent = PLANES[selectedPlane].desc;
+  lobbyCarousel.show(selectedPlane, dir);
+  const spec = PLANES[selectedPlane];
+  el.carName.textContent = spec.name;
+  el.carDesc.textContent = spec.desc;
+  el.lobbyCarName.textContent = spec.name;
+  el.lobbyCarDesc.textContent = spec.desc;
+  if (!silent && mp.active && mp.net) {
+    mp.net.send({ t: "plane", plane: selectedPlane });
+    renderLobby();
+  }
 }
 el.carPrev.addEventListener("click", () => selectPlane(planeIdx - 1, -1));
 el.carNext.addEventListener("click", () => selectPlane(planeIdx + 1, 1));
-selectPlane(0);
+el.lobbyCarPrev.addEventListener("click", () => selectPlane(planeIdx - 1, -1));
+el.lobbyCarNext.addEventListener("click", () => selectPlane(planeIdx + 1, 1));
+selectPlane(0, 0, true);
 carousel.setActive(false);
+lobbyCarousel.setActive(false);
 
 // wybór trybu — same przyciski, instrukcja pokazuje się dopiero pod spodem
 const MODE_PLACEHOLDERS = {
@@ -346,6 +374,7 @@ function showLanding() {
   el.menu.classList.add("hidden");
   el.lobby.classList.add("hidden");
   carousel.setActive(false);
+  lobbyCarousel.setActive(false);
   history.replaceState(null, "", location.pathname + location.search);
 }
 
@@ -356,6 +385,7 @@ function showSoloMenu() {
   el.lobby.classList.add("hidden");
   el.menu.classList.remove("hidden");
   carousel.setActive(true);
+  lobbyCarousel.setActive(false);
 }
 
 function showLobby() {
@@ -364,6 +394,8 @@ function showLobby() {
   el.menu.classList.add("hidden");
   el.lobby.classList.remove("hidden");
   carousel.setActive(false);
+  lobbyCarousel.setActive(true);
+  applyLobbySetup();
   renderLobby();
 }
 
@@ -374,11 +406,14 @@ function setLobbyStatus(msg, isErr = false) {
 
 function renderLobby() {
   const rows = [];
-  rows.push(playerRow(mp.myName + " (Ty)", mp.myReady));
-  if (mp.peerOn) rows.push(playerRow(mp.theirName || "Gość", mp.theirReady));
+  rows.push(playerRow(mp.myName + " (Ty)", mp.myReady, selectedPlane));
+  if (mp.peerOn) rows.push(playerRow(mp.theirName || "Gość", mp.theirReady, mp.theirPlane));
   else rows.push(`<div class="player-row empty">Czekam na drugiego gracza…</div>`);
   el.lobbyPlayers.innerHTML = rows.join("");
   el.lobbyScopes.classList.toggle("locked", !mp.host);
+  document.querySelector(".lobby-modes")?.classList.toggle("locked", !mp.host);
+  el.lobbyCity.classList.toggle("locked", !mp.host);
+  el.lobbyCity.readOnly = !mp.host;
   if (mp.roomId) el.lobbyLink.value = roomLink(mp.roomId);
   el.lobbyStart.textContent = mp.myReady ? "Anuluj gotowość" : "Start";
   if (!mp.peerOn) setLobbyStatus("Wyślij link znajomemu — oboje musicie nacisnąć Start");
@@ -387,8 +422,36 @@ function renderLobby() {
   else setLobbyStatus("Oboje naciśnijcie Start, żeby lecieć razem");
 }
 
-function playerRow(name, ready) {
-  return `<div class="player-row${ready ? " ready" : ""}"><span>${name}</span><span class="p-ready">${ready ? "GOTOWY" : "CZEKA"}</span></div>`;
+function playerRow(name, ready, planeKey) {
+  const plane = PLANES[planeKey]?.name || "";
+  return `<div class="player-row${ready ? " ready" : ""}"><div class="p-meta"><span>${name}</span><span class="p-plane">${plane}</span></div><span class="p-ready">${ready ? "GOTOWY" : "CZEKA"}</span></div>`;
+}
+
+const LOBBY_SUBS = {
+  guess: "Minuta lotu, potem mapa — kto bliżej, wygrywa",
+  home: "Host wpisuje adres domu — oboje startujecie ~30 km stąd",
+  free: "Host wybiera miasto startowe — lecicie razem",
+};
+
+function applyLobbySetup() {
+  document.querySelectorAll("#lobby .mode-card").forEach((b) =>
+    b.classList.toggle("selected", b.dataset.mode === mode)
+  );
+  el.lobbyModeDesc.textContent = MODE_DESCS[mode] || "";
+  el.lobbySub.textContent = LOBBY_SUBS[mode] || "Wybierz tryb i samolot";
+  el.lobbyScopes.style.display = mode === "guess" ? "flex" : "none";
+  el.lobbyCity.style.display = mode === "guess" ? "none" : "block";
+  el.lobbyCity.placeholder = MODE_PLACEHOLDERS[mode] || "";
+}
+
+function selectLobbyMode(m, broadcast = false) {
+  mode = m;
+  applyLobbySetup();
+  if (broadcast && mp.host && mp.net) {
+    mp.myReady = false;
+    mp.net.send({ t: "mode", mode: m, city: el.lobbyCity.value, scope: guessScope });
+  }
+  renderLobby();
 }
 
 function attachNet(api) {
@@ -406,6 +469,8 @@ function handleNetData(data) {
         name: mp.myName,
         plane: selectedPlane,
         scope: guessScope,
+        mode,
+        city: el.lobbyCity.value,
         ready: mp.myReady,
         score: mp.score,
       });
@@ -416,16 +481,30 @@ function handleNetData(data) {
     mp.theirPlane = data.plane || "pa28";
     mp.theirReady = !!data.ready;
     if (data.scope) setLobbyScope(data.scope);
+    if (data.mode) selectLobbyMode(data.mode);
+    if (data.city != null) el.lobbyCity.value = data.city;
     if (data.score) mp.score = { me: data.score.them ?? 0, them: data.score.me ?? 0 };
+    applyLobbySetup();
     renderLobby();
   } else if (data.t === "scope") {
     setLobbyScope(data.scope);
+  } else if (data.t === "mode") {
+    if (data.scope) setLobbyScope(data.scope);
+    if (data.city != null) el.lobbyCity.value = data.city;
+    mp.myReady = false;
+    mp.theirReady = false;
+    selectLobbyMode(data.mode);
+  } else if (data.t === "city") {
+    el.lobbyCity.value = data.city || "";
+  } else if (data.t === "plane") {
+    mp.theirPlane = data.plane || "pa28";
+    renderLobby();
   } else if (data.t === "ready") {
     mp.theirReady = !!data.ready;
     renderLobby();
     tryStartMp();
   } else if (data.t === "start") {
-    startMpFlight(data.lat, data.lon, data.scope);
+    startMpFlight(data);
   } else if (data.t === "pose") {
     mp.pose = data;
     if (data.plane && data.plane !== mateKey) loadMatePlane(data.plane);
@@ -487,6 +566,7 @@ function openHostLobby() {
   mp.host = true;
   mp.myName = "Host";
   mp.score = { me: 0, them: 0 };
+  selectLobbyMode("guess");
   showLobby();
   setLobbyStatus("Tworzę pokój…");
   const api = hostRoom({
@@ -533,34 +613,75 @@ function tryStartMp() {
 
 async function launchMpRound() {
   el.lobbyStart.disabled = true;
-  const scope = GUESS_SCOPES[guessScope];
-  setLobbyStatus(scope.status);
   try {
-    geoCache = await scope.load();
-    const p = scope.random(geoCache);
-    mp.net?.send({ t: "start", lat: p.lat, lon: p.lon, scope: guessScope });
-    startMpFlight(p.lat, p.lon, guessScope);
+    if (mode === "guess") {
+      const scope = GUESS_SCOPES[guessScope];
+      setLobbyStatus(scope.status);
+      geoCache = await scope.load();
+      const p = scope.random(geoCache);
+      const msg = { t: "start", mode, lat: p.lat, lon: p.lon, scope: guessScope };
+      mp.net?.send(msg);
+      startMpFlight(msg);
+    } else if (mode === "home") {
+      const addr = el.lobbyCity.value.trim();
+      if (!addr) {
+        setLobbyStatus("Wpisz adres domu", true);
+        el.lobbyStart.disabled = false;
+        return;
+      }
+      setLobbyStatus("Szukam adresu…");
+      const loc = await geocodeCity(addr);
+      if (!loc) {
+        setLobbyStatus("Nie znaleziono takiego adresu", true);
+        el.lobbyStart.disabled = false;
+        return;
+      }
+      const start = offsetPoint(loc.lat, loc.lon, 20 + Math.random() * 10);
+      const msg = {
+        t: "start",
+        mode,
+        lat: start.lat,
+        lon: start.lon,
+        homeLat: loc.lat,
+        homeLon: loc.lon,
+      };
+      mp.net?.send(msg);
+      startMpFlight(msg);
+    } else {
+      const city = el.lobbyCity.value.trim() || "Niepruszewo";
+      setLobbyStatus(`Szukam: ${city}…`);
+      const loc = await geocodeCity(city);
+      if (!loc) {
+        setLobbyStatus(`Nie znaleziono miejscowości „${city}"`, true);
+        el.lobbyStart.disabled = false;
+        return;
+      }
+      const msg = { t: "start", mode, lat: loc.lat, lon: loc.lon };
+      mp.net?.send(msg);
+      startMpFlight(msg);
+    }
   } catch {
     setLobbyStatus("Błąd — sprawdź sieć i spróbuj ponownie", true);
     el.lobbyStart.disabled = false;
   }
 }
 
-async function startMpFlight(lat, lon, scope) {
-  mode = "guess";
-  guessScope = scope || guessScope;
+async function startMpFlight(msg) {
+  mode = msg.mode || "guess";
+  guessScope = msg.scope || guessScope;
   mp.active = true;
   mp.myGuess = null;
   mp.theirGuess = null;
-  mp.truth = { lat, lon };
+  mp.truth = { lat: msg.lat, lon: msg.lon };
   mp.myReady = false;
   mp.theirReady = false;
   mp.pose = null;
-  timeLeft = GUESS_TIME;
+  homeTarget = msg.homeLat != null ? { lat: msg.homeLat, lon: msg.homeLon } : null;
+  timeLeft = mode === "guess" ? GUESS_TIME : mode === "home" ? HOME_TIME : 0;
   timerActive = false;
   el.lobbyStart.disabled = false;
   setLobbyStatus("Ładowanie terenu…");
-  if (!geoCache) {
+  if (mode === "guess" && !geoCache) {
     try {
       geoCache = await GUESS_SCOPES[guessScope].load();
     } catch {
@@ -568,9 +689,11 @@ async function startMpFlight(lat, lon, scope) {
       return;
     }
   }
-  const spawn = mp.host ? { lat, lon } : offsetPoint(lat, lon, 0.08);
+  const spawn = mp.host ? { lat: msg.lat, lon: msg.lon } : offsetPoint(msg.lat, msg.lon, 0.08);
+  if (selectedPlane !== planeMesh?.userData?.key) loadPlane(selectedPlane);
   loadMatePlane(mp.theirPlane || "pa28");
   beginFlight(spawn.lat, spawn.lon);
+  if (mode === "home" && homeTarget) placeBeaconAt(homeTarget.lat, homeTarget.lon);
 }
 
 function backToLobby() {
@@ -604,6 +727,15 @@ document.querySelectorAll("#lobby-scopes .scope-btn").forEach((btn) => {
     if (!mp.host) return;
     setLobbyScope(btn.dataset.scope, true);
   });
+});
+document.querySelectorAll("#lobby .mode-card").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    if (!mp.host) return;
+    selectLobbyMode(btn.dataset.mode, true);
+  });
+});
+el.lobbyCity.addEventListener("input", () => {
+  if (mp.host && mp.net) mp.net.send({ t: "city", city: el.lobbyCity.value });
 });
 
 function init() {
@@ -871,7 +1003,7 @@ function crash() {
   playExplosionSound();
   shake = 1;
   if (planeMesh) planeMesh.visible = false;
-  if (mp.active) return; // runda trwa — po minucie i tak zgadujecie
+  if (mp.active && mode === "guess") return; // runda trwa — po minucie i tak zgadujecie
   timerActive = false;
   setTimeout(() => showBanner("ROZBIŁEŚ SIĘ"), 900);
 }
