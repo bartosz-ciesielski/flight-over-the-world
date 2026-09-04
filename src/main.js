@@ -30,6 +30,10 @@ import {
   SRGBColorSpace,
   Box3,
   Group,
+  Mesh,
+  MeshBasicMaterial,
+  ConeGeometry,
+  CylinderGeometry,
 } from "three";
 import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
@@ -210,7 +214,9 @@ let shake = 0;
 const matePos = new Vector3();
 const mateQuat = new Quaternion();
 const mateScale = new Vector3();
+const mateUp = new Vector3();
 const MATE_INTERP_MS = 150;
+const MATE_MARKER_MS = 10000;
 const PLAYER_COLORS = ["#7ec8e3", "#e37e7e", "#9dce6a", "#d4a5f5", "#f0c36e", "#6ec8c1"];
 
 const mp = {
@@ -239,6 +245,7 @@ const mp = {
   snapInfo: new Map(),
   rematch: new Set(),
   launching: false,
+  goAt: 0,
 };
 
 const ctrl = { roll: 0, pitch: 0, throttle: 0 };
@@ -944,6 +951,38 @@ function pushMatePose(id, data) {
   if (track.samples.length > 16) track.samples.splice(0, track.samples.length - 16);
 }
 
+function seedMatePose(id, lat, lon, h, planeKey) {
+  if (!id || id === mp.myId) return;
+  loadMate(id, planeKey || "pa28");
+  const track = mp.poses.get(id) || { seq: -1, samples: [], clockOff: 0 };
+  track.samples = [];
+  track.seq = -1;
+  track.clockOff = 0;
+  mp.poses.set(id, track);
+  pushMatePose(id, {
+    seq: 0,
+    t: performance.now(),
+    lat,
+    lon,
+    h,
+    heading: 0,
+    pitch: 0,
+    roll: 0,
+  });
+}
+
+function seedAllMates(h) {
+  const lat0 = mp.truth?.lat;
+  const lon0 = mp.truth?.lon;
+  if (lat0 == null || lon0 == null) return;
+  const total = Object.keys(mp.seats).length || 1;
+  for (const [id, seat] of Object.entries(mp.seats)) {
+    if (id === mp.myId) continue;
+    const spawn = offsetByIndex(lat0, lon0, Number(seat), total);
+    seedMatePose(id, spawn.lat, spawn.lon, h, mp.players.get(id)?.plane || "pa28");
+  }
+}
+
 function offsetByIndex(lat, lon, index, total) {
   if (total <= 1) return { lat, lon };
   const spacingM = 12;
@@ -981,6 +1020,7 @@ async function startMpFlight(msg) {
   mp.goSent = false;
   mp.waitingGo = false;
   mp.launching = false;
+  mp.goAt = 0;
   markRoundStarted(mp.seats);
   homeTarget = msg.homeLat != null ? { lat: msg.homeLat, lon: msg.homeLon } : null;
   timeLeft = mode === "guess" ? GUESS_TIME : mode === "home" ? HOME_TIME : 0;
@@ -1002,10 +1042,8 @@ async function startMpFlight(msg) {
   const total = Object.keys(mp.seats).length || 1;
   const spawn = offsetByIndex(msg.lat, msg.lon, seat, total);
   if (selectedPlane !== planeMesh?.userData?.key) loadPlane(selectedPlane);
-  for (const p of otherPlayers()) {
-    if (p.inRound) loadMate(p.id, p.plane || "pa28");
-  }
   beginFlight(spawn.lat, spawn.lon);
+  seedAllMates(plane.height);
   if (mode === "home" && homeTarget) placeBeaconAt(homeTarget.lat, homeTarget.lon);
   if (mp.host) {
     broadcastRoster();
@@ -1061,6 +1099,9 @@ function applyGo(msg) {
     groundAlt = payload.h - (mode === "guess" ? 350 : 320);
   }
   camInit = false;
+  mp.goAt = performance.now();
+  mp.lastPoseAt = 0;
+  seedAllMates(payload.h ?? plane.height);
   hideMpWait();
   finishSnapStart();
 }
@@ -1331,6 +1372,7 @@ function loadPlane(key) {
 function disposeMate(id) {
   const mate = mp.mates.get(id);
   if (mate?.mesh && scene) scene.remove(mate.mesh);
+  if (mate?.marker && scene) scene.remove(mate.marker);
   mp.mates.delete(id);
 }
 
@@ -1341,7 +1383,28 @@ function disposeAllMates() {
 function hideAllMates() {
   for (const mate of mp.mates.values()) {
     if (mate.mesh) mate.mesh.visible = false;
+    if (mate.marker) mate.marker.visible = false;
   }
+}
+
+function createMateMarker() {
+  const g = new Group();
+  const mat = new MeshBasicMaterial({ color: 0xffd34d, depthTest: false });
+  const shaft = new Mesh(new CylinderGeometry(0.45, 0.45, 9, 7), mat);
+  shaft.position.y = 6;
+  const head = new Mesh(new ConeGeometry(2.6, 5.5, 7), mat);
+  head.rotation.x = Math.PI;
+  head.position.y = -1.2;
+  g.add(shaft, head);
+  g.visible = false;
+  g.renderOrder = 10;
+  scene.add(g);
+  return g;
+}
+
+function ensureMateMarker(mate) {
+  if (!mate.marker && scene) mate.marker = createMateMarker();
+  return mate.marker;
 }
 
 function loadMate(id, key) {
@@ -1377,7 +1440,7 @@ function loadMate(id, key) {
     wrapper.visible = cur.mesh.visible;
     scene.remove(cur.mesh);
     scene.add(wrapper);
-    mp.mates.set(id, { mesh: wrapper, key });
+    mp.mates.set(id, { mesh: wrapper, key, marker: cur.marker });
   });
 }
 
@@ -1939,7 +2002,15 @@ function animate() {
       mm.decompose(matePos, mateQuat, mateScale);
       mate.mesh.position.copy(matePos);
       mate.mesh.quaternion.copy(mateQuat);
+      mate.mesh.scale.copy(mateScale);
       mate.mesh.visible = true;
+      const marker = ensureMateMarker(mate);
+      const markOn = mp.goAt && performance.now() - mp.goAt < MATE_MARKER_MS;
+      mateUp.set(0, 1, 0).applyQuaternion(mateQuat).normalize();
+      marker.scale.copy(mateScale);
+      marker.position.copy(matePos).addScaledVector(mateUp, 18 * (mateScale.y || 1));
+      marker.quaternion.copy(mateQuat);
+      marker.visible = markOn && Math.sin(performance.now() * 0.014) > 0;
     }
   } else {
     hideAllMates();
