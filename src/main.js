@@ -213,9 +213,7 @@ const explosions = [];
 let shake = 0;
 const matePos = new Vector3();
 const mateQuat = new Quaternion();
-const mateScale = new Vector3();
 const mateUp = new Vector3();
-const MATE_INTERP_MS = 150;
 const MATE_MARKER_MS = 10000;
 const PLAYER_COLORS = ["#7ec8e3", "#e37e7e", "#9dce6a", "#d4a5f5", "#f0c36e", "#6ec8c1"];
 
@@ -241,7 +239,6 @@ const mp = {
   waitingGo: false,
   truth: null,
   lastPoseAt: 0,
-  poseSeq: 0,
   snapInfo: new Map(),
   rematch: new Set(),
   launching: false,
@@ -687,8 +684,23 @@ function handleNetData(data, fromId) {
   } else if (data.t === "pose") {
     const id = data.from;
     if (!id || id === mp.myId) return;
-    pushMatePose(id, data);
-    if (data.plane) loadMate(id, data.plane);
+    const prev = mp.poses.get(id);
+    mp.poses.set(id, {
+      lat: data.lat,
+      lon: data.lon,
+      h: data.h,
+      heading: data.heading,
+      pitch: data.pitch,
+      roll: data.roll,
+      plane: data.plane,
+      showLat: prev?.showLat ?? data.lat,
+      showLon: prev?.showLon ?? data.lon,
+      showH: prev?.showH ?? data.h,
+      showHeading: prev?.showHeading ?? data.heading,
+      showPitch: prev?.showPitch ?? data.pitch,
+      showRoll: prev?.showRoll ?? data.roll,
+    });
+    loadMate(id, data.plane || "pa28");
   } else if (data.t === "guess") {
     const id = data.from;
     if (!id || id === mp.myId) return;
@@ -924,50 +936,24 @@ function lerpAngle(a, b, t) {
   return a + d * t;
 }
 
-function pushMatePose(id, data) {
-  const seq = data.seq ?? 0;
-  let track = mp.poses.get(id);
-  if (!track) {
-    track = { seq: -1, samples: [], clockOff: null };
-    mp.poses.set(id, track);
-  }
-  if (seq && seq <= track.seq) return;
-  track.seq = seq || track.seq;
-  const localNow = performance.now();
-  const senderT = typeof data.t === "number" ? data.t : localNow;
-  if (track.clockOff == null) track.clockOff = localNow - senderT;
-  else track.clockOff += (localNow - senderT - track.clockOff) * 0.08;
-  const last = track.samples[track.samples.length - 1];
-  const t = Math.max(senderT + track.clockOff, last ? last.t + 1 : 0);
-  track.samples.push({
-    t,
-    lat: data.lat,
-    lon: data.lon,
-    h: data.h,
-    heading: data.heading,
-    pitch: data.pitch,
-    roll: data.roll,
-  });
-  if (track.samples.length > 16) track.samples.splice(0, track.samples.length - 16);
-}
-
 function seedMatePose(id, lat, lon, h, planeKey) {
   if (!id || id === mp.myId) return;
   loadMate(id, planeKey || "pa28");
-  const track = mp.poses.get(id) || { seq: -1, samples: [], clockOff: 0 };
-  track.samples = [];
-  track.seq = -1;
-  track.clockOff = 0;
-  mp.poses.set(id, track);
-  pushMatePose(id, {
-    seq: 0,
-    t: performance.now(),
+  const prev = mp.poses.get(id);
+  mp.poses.set(id, {
     lat,
     lon,
     h,
     heading: 0,
     pitch: 0,
     roll: 0,
+    plane: planeKey,
+    showLat: prev?.showLat ?? lat,
+    showLon: prev?.showLon ?? lon,
+    showH: prev?.showH ?? h,
+    showHeading: prev?.showHeading ?? 0,
+    showPitch: prev?.showPitch ?? 0,
+    showRoll: prev?.showRoll ?? 0,
   });
 }
 
@@ -1011,7 +997,6 @@ async function startMpFlight(msg) {
   mp.active = true;
   mp.guesses.clear();
   mp.poses.clear();
-  mp.poseSeq = 0;
   mp.truth = { lat: msg.lat, lon: msg.lon };
   mp.seats = msg.seats || {};
   mp.snapped = new Set();
@@ -1945,16 +1930,13 @@ function animate() {
     planeMesh.userData.prop.rotation.z += plane.speed * dt * 1.6;
   }
 
-  if (mp.active && mp.inRound && !menuOpen && !guessOpen && !crashed) {
+  if (mp.active && !menuOpen && !guessOpen && !crashed) {
     const now = performance.now();
     if (now - mp.lastPoseAt > 50) {
       mp.lastPoseAt = now;
-      mp.poseSeq += 1;
       mp.net?.send({
         t: "pose",
         from: mp.myId,
-        seq: mp.poseSeq,
-        t: now,
         lat: plane.latDeg,
         lon: plane.lonDeg,
         h: plane.height,
@@ -1965,50 +1947,37 @@ function animate() {
       });
     }
   }
-  if (mp.active && mp.inRound && !menuOpen) {
-    const renderAt = performance.now() - MATE_INTERP_MS;
+  if (mp.active && !menuOpen) {
     const deg = Math.PI / 180;
-    for (const [id, track] of mp.poses) {
+    const follow = 1 - Math.exp(-14 * dt);
+    for (const [id, pose] of mp.poses) {
+      if (id === mp.myId) continue;
+      if (!mp.mates.get(id)?.mesh) loadMate(id, pose.plane || "pa28");
       const mate = mp.mates.get(id);
-      const samples = track.samples;
-      if (!mate?.mesh || !samples.length) continue;
-      let from = samples[0];
-      let to = samples[samples.length - 1];
-      let u = 1;
-      if (renderAt <= samples[0].t) {
-        to = from;
-        u = 0;
-      } else if (renderAt >= to.t) {
-        from = to;
-        u = 1;
-      } else {
-        for (let i = 1; i < samples.length; i++) {
-          if (samples[i].t >= renderAt) {
-            from = samples[i - 1];
-            to = samples[i];
-            u = (renderAt - from.t) / Math.max(1, to.t - from.t);
-            break;
-          }
-        }
-      }
+      if (!mate?.mesh) continue;
+      pose.showLat += (pose.lat - pose.showLat) * follow;
+      pose.showLon += (pose.lon - pose.showLon) * follow;
+      pose.showH += (pose.h - pose.showH) * follow;
+      pose.showHeading = lerpAngle(pose.showHeading, pose.heading, follow);
+      pose.showPitch += (pose.pitch - pose.showPitch) * follow;
+      pose.showRoll += (pose.roll - pose.showRoll) * follow;
       const mm = frameAt(
-        (from.lat + (to.lat - from.lat) * u) * deg,
-        (from.lon + (to.lon - from.lon) * u) * deg,
-        from.h + (to.h - from.h) * u,
-        lerpAngle(from.heading, to.heading, u),
-        from.pitch + (to.pitch - from.pitch) * u,
-        -(from.roll + (to.roll - from.roll) * u)
+        pose.showLat * deg,
+        pose.showLon * deg,
+        pose.showH,
+        pose.showHeading,
+        pose.showPitch,
+        -pose.showRoll
       );
-      mm.decompose(matePos, mateQuat, mateScale);
+      mm.decompose(matePos, mateQuat, mate.mesh.scale);
       mate.mesh.position.copy(matePos);
       mate.mesh.quaternion.copy(mateQuat);
-      mate.mesh.scale.copy(mateScale);
       mate.mesh.visible = true;
       const marker = ensureMateMarker(mate);
       const markOn = mp.goAt && performance.now() - mp.goAt < MATE_MARKER_MS;
       mateUp.set(0, 1, 0).applyQuaternion(mateQuat).normalize();
-      marker.scale.copy(mateScale);
-      marker.position.copy(matePos).addScaledVector(mateUp, 18 * (mateScale.y || 1));
+      marker.scale.copy(mate.mesh.scale);
+      marker.position.copy(matePos).addScaledVector(mateUp, 18 * (mate.mesh.scale.y || 1));
       marker.quaternion.copy(mateQuat);
       marker.visible = markOn && Math.sin(performance.now() * 0.014) > 0;
     }
@@ -2167,6 +2136,15 @@ function animate() {
 
   renderer.render(scene, camera);
 
+  const mateDbg = [];
+  for (const [id, mate] of mp.mates) {
+    mateDbg.push({
+      id,
+      visible: !!mate.mesh?.visible,
+      dist: mate.mesh ? Math.round(mate.mesh.position.distanceTo(planePos)) : -1,
+      hasPose: mp.poses.has(id),
+    });
+  }
   window.__dbg = {
     frame: frameCount,
     children: tiles.group.children.length,
@@ -2186,10 +2164,32 @@ function animate() {
     music: musicDebug(),
     camDist: camera.position.distanceTo(planePos),
     camOffset,
+    mpActive: mp.active,
+    inRound: mp.inRound,
+    menuOpen,
+    poses: mp.poses.size,
+    mates: mateDbg,
   };
   window.__cam = camera;
   window.__planeMesh = planeMesh;
 }
+
+window.__forceTestMate = () => {
+  mp.active = true;
+  menuOpen = false;
+  paused = true;
+  el.menu.classList.add("hidden");
+  el.landing.classList.add("hidden");
+  el.lobby.classList.add("hidden");
+  hideMpWait();
+  const R = 6378137;
+  const aheadM = 35;
+  const eastM = 10;
+  const lat = plane.latDeg + (aheadM / R) * (180 / Math.PI);
+  const lon = plane.lonDeg + (eastM / (R * Math.cos(plane.lat))) * (180 / Math.PI);
+  seedMatePose("test-mate", lat, lon, plane.height, selectedPlane);
+  mp.goAt = performance.now();
+};
 
 function updateHud(agl) {
   // skala prędkościomierza pod najszybszy pojazd (nitro), zaokrąglona w górę
