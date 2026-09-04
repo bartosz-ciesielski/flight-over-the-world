@@ -18,7 +18,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
+      - run: npm install --no-audit --no-fund
       - run: npm run build
         env:
           VITE_CESIUM_ION_KEY: ${{ secrets.VITE_CESIUM_ION_KEY }}
