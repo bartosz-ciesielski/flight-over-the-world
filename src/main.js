@@ -207,6 +207,7 @@ let awaitingSnap = false; // guess: menu/overlay czeka na pomiar terenu, start o
 let awaitingSnapSince = 0;
 let snapLastGh = null; // dosadzenie dopiero gdy pomiar terenu się ustabilizuje (kafelki się doprecyzują)
 let snapStableCount = 0;
+let snapFirstAt = 0;
 let geoCache = null;
 let beaconGrounded = false;
 const explosions = [];
@@ -666,7 +667,12 @@ function handleNetData(data, fromId) {
     tryStartMp();
   } else if (data.t === "snapped") {
     if (data.from) {
-      mp.snapInfo.set(data.from, { h: data.h, heading: data.heading ?? 0 });
+      mp.snapInfo.set(data.from, {
+        h: data.h,
+        gh: data.gh,
+        heading: data.heading ?? 0,
+        probed: data.probed !== false,
+      });
       mp.snapped.add(data.from);
     }
     if (mp.host) tryReleaseGo();
@@ -1040,10 +1046,12 @@ async function startMpFlight(msg) {
   if (mode === "home" && homeTarget) placeBeaconAt(homeTarget.lat, homeTarget.lon);
   if (mp.host) {
     broadcastRoster();
-    setTimeout(() => {
+    const releaseIfSnapped = () => {
       if (!mp.host || !mp.roundActive || mp.goSent) return;
-      if ([...mp.snapInfo.values()].some((s) => isHoverHeight(s.h))) applyGo();
-    }, 12000);
+      if ([...mp.snapInfo.values()].some(isTerrainSnap)) applyGo();
+    };
+    setTimeout(releaseIfSnapped, 12000);
+    setTimeout(releaseIfSnapped, 22000);
   }
 }
 
@@ -1052,7 +1060,12 @@ function reportSnapped() {
   mp.waitingGo = true;
   setLobbyStatus("Czekam aż wszyscy będą gotowi…");
   showMpWait("Czekam aż wszyscy będą gotowi…");
-  const info = { h: plane.height, gh: groundAlt, heading: 0 };
+  const info = {
+    h: plane.height,
+    gh: groundAlt,
+    heading: 0,
+    probed: snapLastGh !== null,
+  };
   mp.snapInfo.set(mp.myId, info);
   mp.net?.send({ t: "snapped", from: mp.myId, ...info });
   if (mp.host) {
@@ -1064,31 +1077,44 @@ function reportSnapped() {
 function tryReleaseGo() {
   if (!mp.host || mp.goSent) return;
   const need = Object.keys(mp.seats || {});
-  if (need.length && need.every((id) => mp.snapped.has(id))) applyGo();
+  if (!need.length || !need.every((id) => mp.snapped.has(id))) return;
+  if (![...mp.snapInfo.values()].some(isTerrainSnap)) return;
+  applyGo();
 }
 
 function snapAgl() {
   return mode === "guess" ? 350 : 320;
 }
 
-function isHoverHeight(h) {
-  return Number.isFinite(h) && h < 4000;
+function spawnHoldAlt() {
+  if (mode === "guess") return guessScope === "pl" ? 3000 : 9500;
+  return 6000;
+}
+
+function isTerrainSnap(s) {
+  if (!s || !Number.isFinite(s.h) || !Number.isFinite(s.gh)) return false;
+  if (s.probed === false) return false;
+  if (Math.abs(s.h - s.gh - snapAgl()) > 100) return false;
+  if (Math.abs(s.h - spawnHoldAlt()) < 300) return false;
+  return true;
 }
 
 function buildGoPayload() {
-  const heights = [...mp.snapInfo.values()].map((s) => s.h).filter(isHoverHeight);
-  if (heights.length) {
-    return { h: heights.slice().sort((a, b) => a - b)[Math.floor(heights.length / 2)], heading: 0 };
-  }
-  if (isHoverHeight(plane?.height)) return { h: plane.height, heading: 0 };
-  return { h: (Number.isFinite(groundAlt) ? groundAlt : TERRAIN_ALT) + snapAgl(), heading: 0 };
+  const snaps = [...mp.snapInfo.values()].filter(isTerrainSnap);
+  if (!snaps.length) return null;
+  const ghs = snaps.map((s) => s.gh).sort((a, b) => a - b);
+  const gh = ghs[Math.floor(ghs.length / 2)];
+  return { h: gh + snapAgl(), gh, heading: 0 };
 }
 
 function applyGo(msg) {
   if (mp.goSent) return;
+  const payload = msg && Number.isFinite(msg.h)
+    ? { h: msg.h, gh: msg.gh, heading: msg.heading ?? 0 }
+    : buildGoPayload();
+  if (!payload) return;
   mp.goSent = true;
   mp.waitingGo = false;
-  const payload = msg?.h != null ? { h: msg.h, heading: msg.heading ?? 0 } : buildGoPayload();
   if (mp.host) mp.net?.send({ t: "go", ...payload });
   pendingSnap = false;
   awaitingSnap = false;
@@ -1099,7 +1125,7 @@ function applyGo(msg) {
     plane.roll = 0;
     ctrl.roll = 0;
     ctrl.pitch = 0;
-    groundAlt = payload.h - snapAgl();
+    groundAlt = payload.gh ?? payload.h - snapAgl();
   }
   camInit = false;
   mp.goAt = performance.now();
@@ -1463,6 +1489,7 @@ function resetFlight(latDeg, lonDeg) {
   pendingSnap = true; // udany, ustabilizowany pomiar terenu dosadzi samolot na właściwą wysokość
   snapLastGh = null;
   snapStableCount = 0;
+  snapFirstAt = 0;
   crashed = false;
   finished = false;
   shake = 0;
@@ -2078,11 +2105,13 @@ function animate() {
   }
 
   if ((!menuOpen || awaitingSnap) && frameCount % 8 === 0) {
-    const gh = probeGround(plane.lat, plane.lon, plane.height);
+    const refH = pendingSnap || awaitingSnap ? Math.max(plane.height, spawnHoldAlt()) : plane.height;
+    const gh = probeGround(plane.lat, plane.lon, refH);
     if (gh !== null) {
       groundAlt = gh;
       if (pendingSnap) {
         plane.height = gh + snapAgl();
+        if (!snapFirstAt) snapFirstAt = performance.now();
         if (snapLastGh !== null && Math.abs(gh - snapLastGh) < 25) {
           snapStableCount += 1;
         } else {
@@ -2090,7 +2119,8 @@ function animate() {
         }
         snapLastGh = gh;
         const need = tiles.isLoading ? 4 : 2;
-        if (snapStableCount >= need) {
+        const waited = performance.now() - snapFirstAt > 1500;
+        if (snapStableCount >= need && waited) {
           pendingSnap = false;
           if (awaitingSnap) {
             awaitingSnap = false;
@@ -2101,11 +2131,10 @@ function animate() {
       }
     }
   }
-  // teren się nie zmierzył (sieć/błąd kafelków) — startuj mimo to
-  if (awaitingSnap && performance.now() - awaitingSnapSince > 15000) {
+  if (awaitingSnap && performance.now() - awaitingSnapSince > 20000) {
     awaitingSnap = false;
     pendingSnap = false;
-    if (Number.isFinite(groundAlt)) plane.height = groundAlt + snapAgl();
+    if (snapLastGh !== null) plane.height = snapLastGh + snapAgl();
     if (mp.active && mp.inRound) reportSnapped();
     else finishSnapStart();
   }
