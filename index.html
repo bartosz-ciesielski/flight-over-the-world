@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Lot nad światem</title>
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="icon" href="data:," />
+    <script type="module" crossorigin src="./assets/index-C-t8oQbu.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-wbhsiWDt.css">
+  </head>
+  <body>
+    <div id="loader">
+      <div class="loader-card">
+        <h2>Lot nad światem</h2>
+        <p class="sub">Swobodny lot</p>
+        <div class="bar"><i id="loader-bar"></i></div>
+        <p id="loader-text">Wczytywanie</p>
+      </div>
+    </div>
+
+    <div id="menu">
+      <div class="menu-card">
+        <h1>Lot nad światem</h1>
+
+        <div class="carousel">
+          <button id="car-prev" type="button" aria-label="Poprzedni">‹</button>
+          <canvas id="carousel-canvas"></canvas>
+          <button id="car-next" type="button" aria-label="Następny">›</button>
+        </div>
+        <div class="car-info">
+          <span id="car-name">Piper PA-28</span>
+          <span id="car-desc">Lekki śmigłowiec — zwinny · przelot ~170 km/h</span>
+        </div>
+
+        <div class="modes">
+          <button class="mode-card selected" data-mode="guess" type="button">
+            <span class="m-name">Zgadnij region</span>
+          </button>
+          <button class="mode-card" data-mode="home" type="button">
+            <span class="m-name">Doleć do domu</span>
+          </button>
+          <button class="mode-card" data-mode="free" type="button">
+            <span class="m-name">Swobodny lot</span>
+          </button>
+        </div>
+        <p id="mode-desc"></p>
+
+        <div class="start-row">
+          <input id="city-input" type="text" placeholder="Miasto startowe… np. Niepruszewo" autocomplete="off" />
+          <div id="guess-scope" style="display: none">
+            <button class="scope-btn selected" data-scope="pl" type="button">🇵🇱 Polska</button>
+            <button class="scope-btn" data-scope="eu" type="button">🇪🇺 Europa</button>
+            <button class="scope-btn" data-scope="world" type="button">🌍 Świat</button>
+          </div>
+          <button id="start-btn" type="button">Start</button>
+        </div>
+        <p id="menu-error"></p>
+          <p class="hint"><kbd>A</kbd><kbd>D</kbd> skręt · <kbd>W</kbd><kbd>S</kbd> wysokość · <kbd>Shift</kbd> nitro · <kbd>Ctrl</kbd> hamulec · <kbd>Esc</kbd> pauza</p>
+      </div>
+    </div>
+
+    <div id="pause">
+      <div class="pause-card">
+        <h2>Pauza</h2>
+        <button id="btn-resume" type="button">Kontynuuj</button>
+        <button id="btn-restart" class="ghost" type="button">Od nowa</button>
+      </div>
+    </div>
+
+    <div id="guessmap">
+      <div class="gm-card">
+        <h2>Gdzie jesteś?</h2>
+        <p class="sub" id="gm-sub">Kliknij punkt na mapie Polski</p>
+        <canvas id="gm-canvas"></canvas>
+        <p id="gm-result"></p>
+        <div class="gm-actions">
+          <button id="gm-retry" type="button" style="display: none">Spróbuj ponownie</button>
+          <button id="gm-close" class="ghost" type="button" style="display: none">Wróć do menu</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="hud">
+      <div id="f-banner"><div class="b-title"></div><div class="b-sub"></div></div>
+
+      <div id="f-instruments">
+        <canvas id="g-speed" class="gauge"></canvas>
+        <canvas id="g-alt" class="gauge"></canvas>
+        <canvas id="g-hdg" class="gauge"></canvas>
+      </div>
+
+      <div id="f-center">
+        <div class="f-box" id="f-timer-box"><span class="f-label">Pozostały czas</span><span id="f-timer">10:00</span></div>
+        <div class="f-box" id="f-dist-box"><span class="f-label">Do celu</span><span id="f-dist">—</span></div>
+      </div>
+    </div>
+
+  </body>
+</html>
