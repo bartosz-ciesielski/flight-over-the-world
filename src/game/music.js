@@ -1,54 +1,26 @@
-import { getAudioCtx, primeAudio } from "./explosion.js";
-import { asset } from "./asset.js";
-
 const TARGET = 0.22;
 
-let el = window.__bgm || null;
-let gain = null;
-let hooked = false;
-
-function ensure() {
-  const ctx = getAudioCtx();
-  if (!ctx) return null;
-  if (!el) {
-    el = new Audio(asset("music/theme.mp3"));
-    el.loop = true;
-    el.preload = "auto";
-    el.crossOrigin = "anonymous";
-    window.__bgm = el;
-  }
-  if (!hooked) {
-    try {
-      const src = ctx.createMediaElementSource(el);
-      gain = ctx.createGain();
-      gain.gain.value = 0;
-      src.connect(gain).connect(ctx.destination);
-      hooked = true;
-    } catch {
-      // MediaElementSource można podpiąć tylko raz na element
-    }
-  }
-  return ctx;
+const el = document.getElementById("bgm");
+if (el) {
+  el.loop = true;
+  el.volume = TARGET;
+  window.__bgm = el;
+  el.play().catch(() => {});
 }
 
 export function updateMusic() {
-  const ctx = ensure();
-  if (!ctx || !el || !gain) return;
-
-  const t = ctx.currentTime;
-  gain.gain.setTargetAtTime(TARGET, t, 0.8);
-  if (el.paused) el.play().catch(() => {});
+  if (el && el.paused) el.play().catch(() => {});
 }
 
 export function primeMusic() {
-  primeAudio();
-  if (ensure() && el) el.play().catch(() => {});
+  if (el) el.play().catch(() => {});
 }
 
 export function musicDebug() {
+  if (!el) return { paused: null, time: null, gain: null };
   return {
-    paused: el ? el.paused : null,
-    time: el ? Math.round(el.currentTime * 10) / 10 : null,
-    gain: gain ? Math.round(gain.gain.value * 1000) / 1000 : null,
+    paused: el.paused,
+    time: Math.round(el.currentTime * 10) / 10,
+    gain: el.volume,
   };
 }
