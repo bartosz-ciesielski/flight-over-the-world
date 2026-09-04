@@ -45,7 +45,7 @@ import {
   primeAudio,
 } from "./game/explosion.js";
 import { updateEngineSound, engineDebug } from "./game/engineSound.js";
-import { updateMusic, primeMusic, musicDebug } from "./game/music.js";
+import { updateMusic, musicDebug } from "./game/music.js";
 
 // rakieta stoi pionowo (+Y) — połóż ją nosem do przodu (-Z, konwencja lotu)
 function prepareRocket(model) {
@@ -593,7 +593,7 @@ function beginFlight(lat, lon) {
   if (selectedPlane !== planeMesh?.userData?.key) loadPlane(selectedPlane);
   resetFlight(lat, lon);
   el.timerBox.classList.toggle("show", mode !== "free");
-  el.distBox.classList.toggle("show", mode === "home");
+  el.distBox.classList.remove("show");
   // menu zostaje we wszystkich trybach — gracz nie widzi wysokiego spawnu,
   // a samolot nie jest szarpany dosadzeniem w trakcie sterowania
   awaitingSnap = true;
@@ -613,15 +613,8 @@ function finishSnapStart() {
   timerActive = mode !== "free";
 }
 
-function unlockAudio() {
-  primeAudio();
-  primeMusic();
-}
-window.addEventListener("pointerdown", unlockAudio);
-window.addEventListener("keydown", unlockAudio);
-
 el.start.addEventListener("click", () => {
-  unlockAudio();
+  primeAudio();
   startGame();
 });
 el.city.addEventListener("keydown", (e) => {
