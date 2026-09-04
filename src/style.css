@@ -236,7 +236,10 @@ kbd {
   transition: opacity 0.3s ease;
 }
 
-#f-banner.show { opacity: 1; }
+#f-banner.show {
+  opacity: 1;
+  pointer-events: auto;
+}
 
 #f-banner .b-title {
   font-size: 34px;
@@ -250,6 +253,8 @@ kbd {
   font-size: 15px;
   color: var(--muted);
 }
+
+#f-banner .gm-actions { margin-top: 18px; }
 
 /* --- menu startowe --- */
 
@@ -527,7 +532,9 @@ kbd {
 }
 
 #gm-retry,
-#gm-close {
+#gm-close,
+#banner-retry,
+#banner-menu {
   padding: 11px 28px;
   background: var(--gold);
   border: none;
@@ -540,15 +547,19 @@ kbd {
 }
 
 #gm-retry:hover,
-#gm-close:hover { filter: brightness(1.1); }
+#gm-close:hover,
+#banner-retry:hover,
+#banner-menu:hover { filter: brightness(1.1); }
 
-#gm-close.ghost {
+#gm-close.ghost,
+#banner-menu.ghost {
   background: transparent;
   border: 1px solid rgba(243, 234, 214, 0.3);
   color: var(--paper);
 }
 
-#gm-close.ghost:hover { background: rgba(243, 234, 214, 0.08); }
+#gm-close.ghost:hover,
+#banner-menu.ghost:hover { background: rgba(243, 234, 214, 0.08); }
 
 /* --- pauza (ESC) --- */
 

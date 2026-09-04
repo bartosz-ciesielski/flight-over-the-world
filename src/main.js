@@ -211,6 +211,8 @@ const el = {
   gAlt: document.getElementById("g-alt"),
   gHdg: document.getElementById("g-hdg"),
   banner: document.getElementById("f-banner"),
+  bannerRetry: document.getElementById("banner-retry"),
+  bannerMenu: document.getElementById("banner-menu"),
   menu: document.getElementById("menu"),
   city: document.getElementById("city-input"),
   start: document.getElementById("start-btn"),
@@ -524,7 +526,7 @@ function crash() {
   playExplosionSound();
   shake = 1;
   planeMesh.visible = false;
-  setTimeout(() => showBanner("ROZBIŁEŚ SIĘ", "R — jeszcze raz"), 900);
+  setTimeout(() => showBanner("ROZBIŁEŚ SIĘ"), 900);
 }
 
 async function geocodeCity(name) {
@@ -643,6 +645,7 @@ el.restart.addEventListener("click", () => {
 });
 
 function backToMenu() {
+  hideBanner();
   menuOpen = true;
   timerActive = false;
   guessOpen = false;
@@ -695,6 +698,12 @@ el.gmCanvas.addEventListener("click", (e) => {
 
 el.gmClose.addEventListener("click", () => {
   el.guessmap.classList.remove("show");
+  backToMenu();
+});
+
+el.bannerRetry.addEventListener("click", () => restartMode());
+el.bannerMenu.addEventListener("click", () => {
+  hideBanner();
   backToMenu();
 });
 
@@ -912,7 +921,7 @@ function animate() {
       timerActive = false;
       if (mode === "home") {
         finished = true;
-        showBanner("CZAS MINĄŁ", "R — spróbuj ponownie");
+        showBanner("CZAS MINĄŁ");
       } else if (mode === "guess") {
         openGuessMap();
       }
@@ -924,7 +933,7 @@ function animate() {
       finished = true;
       timerActive = false;
       beacon.visible = false;
-      showBanner("DOTARŁEŚ DO DOMU!", "R — leć jeszcze raz");
+      showBanner("DOTARŁEŚ DO DOMU!");
     }
   }
 
@@ -994,10 +1003,12 @@ function updateHud(agl) {
   }
 }
 
-function showBanner(title, sub) {
+function showBanner(title, sub = "") {
   if (!el.banner) return;
   el.banner.querySelector(".b-title").textContent = title;
-  el.banner.querySelector(".b-sub").textContent = sub;
+  const subEl = el.banner.querySelector(".b-sub");
+  subEl.textContent = sub;
+  subEl.style.display = sub ? "" : "none";
   el.banner.classList.add("show");
 }
 
