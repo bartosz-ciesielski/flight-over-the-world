@@ -1224,7 +1224,7 @@ function init() {
     setLoader("Brak klucza mapy — dodaj VITE_CESIUM_ION_KEY do .env", 0);
     return;
   }
-  setLoader("Ładuję fotorealistyczną Polskę…", 0.15);
+  setLoader("Start…", 0.4);
 
   scene = new Scene();
   scene.background = new Color(0x8ec8e8);
@@ -1278,6 +1278,7 @@ function init() {
     new GLTFExtensionsPlugin({ dracoLoader: new DRACOLoader() })
   );
   tiles.group.rotation.x = -Math.PI / 2;
+  tiles.group.visible = false;
   scene.add(tiles.group);
   tiles.setResolutionFromRenderer(camera, renderer);
   tiles.setCamera(camera);
@@ -1319,6 +1320,9 @@ function init() {
 
   loadPlane(selectedPlane);
   resetFlight(startLat, startLon);
+  if (planeMesh) planeMesh.visible = false;
+  loaderDismissed = true;
+  hideLoader();
 
   window.addEventListener("resize", onResize);
   renderer.domElement.addEventListener("webglcontextlost", (e) => {
@@ -2047,8 +2051,7 @@ function animate() {
   sun.target.position.copy(planePos);
   sun.target.updateMatrixWorld();
 
-  // nowe kafelki muszą rzucać i odbierać cienie
-  if (frameCount % 15 === 0) {
+  if (!menuOpen && frameCount % 15 === 0) {
     tiles.group.traverse((o) => {
       if (o.isMesh && !o.castShadow) {
         o.castShadow = true;
@@ -2064,8 +2067,7 @@ function animate() {
     camera.updateProjectionMatrix();
   }
 
-  // wysokość nad terenem + dosadzenie po teleporcie + kolizja
-  if (frameCount % 8 === 0) {
+  if (!menuOpen && frameCount % 8 === 0) {
     const gh = probeGround(plane.lat, plane.lon, plane.height);
     if (gh !== null) {
       groundAlt = gh;
@@ -2143,21 +2145,16 @@ function animate() {
   // HUD
   if (frameCount % 2 === 0) updateHud(agl);
 
-  // kafelki
-  tiles.setResolutionFromRenderer(camera, renderer);
-  tiles.setCamera(camera);
-  camera.updateMatrixWorld();
-  tiles.update();
-
-  if (!loaderDismissed && tiles.group.children.length > 0) {
-    loaderDismissed = true;
-    hideLoader();
-  }
-  if (!loaderDismissed) {
-    setLoader(
-      loadError ?? "Ładuję fotorealistyczną Polskę…",
-      loadError ? 0.05 : Math.min(0.9, 0.15 + tiles.group.children.length * 0.02)
-    );
+  if (menuOpen && !awaitingSnap) {
+    tiles.group.visible = false;
+    if (planeMesh) planeMesh.visible = false;
+  } else {
+    tiles.group.visible = true;
+    if (planeMesh && !crashed) planeMesh.visible = !menuOpen;
+    tiles.setResolutionFromRenderer(camera, renderer);
+    tiles.setCamera(camera);
+    camera.updateMatrixWorld();
+    tiles.update();
   }
 
   renderer.render(scene, camera);
