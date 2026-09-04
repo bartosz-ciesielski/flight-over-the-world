@@ -257,6 +257,7 @@ function selectPlane(i, dir) {
 }
 el.carPrev.addEventListener("click", () => selectPlane(planeIdx - 1, -1));
 el.carNext.addEventListener("click", () => selectPlane(planeIdx + 1, 1));
+selectPlane(0);
 
 // wybór trybu — same przyciski, instrukcja pokazuje się dopiero pod spodem
 const MODE_PLACEHOLDERS = {
