@@ -286,6 +286,8 @@ const el = {
   gmClose: document.getElementById("gm-close"),
   gmRetry: document.getElementById("gm-retry"),
   gmSub: document.getElementById("gm-sub"),
+  gmScoreLeft: document.getElementById("gm-score-left"),
+  gmScoreRight: document.getElementById("gm-score-right"),
   mpWait: document.getElementById("mp-wait"),
   mpWaitText: document.getElementById("mp-wait-text"),
   guessScope: document.getElementById("guess-scope"),
@@ -1757,6 +1759,7 @@ function openGuessMap() {
   guessAnswered = false;
   keys.clear();
   el.gmResult.textContent = "";
+  updateGuessScores();
   el.gmClose.style.display = "none";
   el.gmRetry.style.display = "none";
   el.gmClose.textContent = mp.active ? "Wróć do pokoju" : "Wróć do menu";
@@ -1802,19 +1805,29 @@ function revealMpGuesses() {
     else if (mp.players.has(w.id)) mp.players.get(w.id).score += 1;
   }
   const line = results.map((r) => `${r.name} ${Math.round(r.err)} km`).join(" · ");
-  const scoreboard = [mp.myName, ...otherPlayers().map((p) => p.name)]
-    .map((n, i) => {
-      const pts = i === 0 ? mp.myScore : otherPlayers()[i - 1].score;
-      return `${n} ${pts}`;
-    })
-    .join("–");
   el.gmResult.textContent =
     winners.length > 1
-      ? `Remis — ${line}  (${scoreboard})`
-      : `Wygrywa ${winners[0]?.name} — ${line}  (${scoreboard})`;
+      ? `Remis — ${line}`
+      : winners[0]?.id === mp.myId
+        ? `Wygrywasz — ${line}`
+        : `Wygrywa ${winners[0]?.name} — ${line}`;
+  updateGuessScores();
   el.gmClose.style.display = "";
   el.gmRetry.style.display = "";
   if (mp.host) broadcastRoster();
+}
+
+function updateGuessScores() {
+  if (!el.gmScoreLeft || !el.gmScoreRight) return;
+  if (!mp.active) {
+    el.gmScoreLeft.textContent = "";
+    el.gmScoreRight.textContent = "";
+    return;
+  }
+  el.gmScoreLeft.textContent = `Ty ${mp.myScore}`;
+  el.gmScoreRight.textContent = otherPlayers()
+    .map((p) => `${p.name} ${p.score ?? 0}`)
+    .join("  ");
 }
 
 el.gmCanvas.addEventListener("click", (e) => {

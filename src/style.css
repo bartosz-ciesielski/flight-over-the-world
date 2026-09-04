@@ -814,7 +814,31 @@ kbd {
   backdrop-filter: blur(14px);
 }
 
-.gm-card h2 { margin: 0; font-size: 28px; }
+.gm-head {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  width: min(1080px, 88vw);
+  gap: 16px;
+}
+
+.gm-head h2 {
+  margin: 0;
+  font-size: 28px;
+  text-align: center;
+}
+
+#gm-score-left,
+#gm-score-right {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--gold);
+  line-height: 1.2;
+}
+
+#gm-score-left { justify-self: start; }
+#gm-score-right { justify-self: end; text-align: right; }
+
 .gm-card .sub { margin: 6px 0 16px; }
 
 #gm-canvas {
