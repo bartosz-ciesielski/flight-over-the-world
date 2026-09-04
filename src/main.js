@@ -45,7 +45,7 @@ import {
   primeAudio,
 } from "./game/explosion.js";
 import { updateEngineSound, engineDebug } from "./game/engineSound.js";
-import { updateMusic, musicDebug } from "./game/music.js";
+import { musicDebug } from "./game/music.js";
 
 // rakieta stoi pionowo (+Y) — połóż ją nosem do przodu (-Z, konwencja lotu)
 function prepareRocket(model) {
@@ -120,7 +120,7 @@ const PLANES = {
     cruise: 48, boost: 85, brake: 30,
     cam: [0, 5.5, 15],
     name: "Piper PA-28",
-    desc: "Lekki śmigłowiec — zwinny · przelot ~170 km/h",
+    desc: "Lekki śmigłowiec – 170 km/h",
     sound: "plane",
   },
   q400: {
@@ -129,7 +129,7 @@ const PLANES = {
     cruise: 75, boost: 115, brake: 45,
     cam: [0, 9, 32],
     name: "Dash 8 Q400",
-    desc: "Turbośmigłowy pasażerski · przelot ~270 km/h",
+    desc: "Turbośmigłowy pasażerski – 270 km/h",
     sound: "plane",
   },
   citation: {
@@ -138,7 +138,7 @@ const PLANES = {
     cruise: 92, boost: 150, brake: 55,
     cam: [0, 7, 24],
     name: "Cessna Citation",
-    desc: "Odrzutowiec biznesowy — szybki · przelot ~330 km/h",
+    desc: "Odrzutowiec biznesowy – 330 km/h",
     sound: "jet",
   },
   jet: {
@@ -147,7 +147,7 @@ const PLANES = {
     cruise: 150, boost: 260, brake: 80,
     cam: [0, 6, 19],
     name: "Myśliwiec",
-    desc: "Odrzutowiec bojowy — bardzo szybki · przelot ~540 km/h",
+    desc: "Odrzutowiec bojowy – 540 km/h",
     sound: "jet",
     prepare: prepareJet,
   },
@@ -157,7 +157,7 @@ const PLANES = {
     cruise: 220, boost: 380, brake: 120,
     cam: [0, 6, 20],
     name: "Rakieta",
-    desc: "Rakieta kosmiczna — ekstremalna · przelot ~790 km/h",
+    desc: "Rakieta kosmiczna – 790 km/h",
     sound: "rocket",
     prepare: prepareRocket,
   },
@@ -782,7 +782,6 @@ function animate() {
     )
   );
   updateEngineSound(flying, rpm01, speed01, PLANES[selectedPlane].sound);
-  updateMusic();
 
   // pozycja i orientacja samolotu
   const m = frameAt(plane.lat, plane.lon, plane.height, plane.heading, plane.pitch, -plane.roll);

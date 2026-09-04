@@ -1,32 +1,22 @@
+import { asset } from "./asset.js";
+
 const TARGET = 0.22;
 
-const el =
-  document.getElementById("bgm") ||
-  Object.assign(new Audio("./music/theme.mp3"), { loop: true, preload: "auto" });
-
-el.loop = true;
-el.preload = "auto";
-el.playsInline = true;
-el.volume = TARGET;
-
-function kick() {
-  el.muted = false;
+function getPlayer() {
+  if (window.__bgm) return window.__bgm;
+  const el = new Audio(asset("music/theme.mp3"));
+  el.loop = true;
+  el.preload = "auto";
+  el.playsInline = true;
   el.volume = TARGET;
-  const p = el.play();
-  if (p) p.catch(() => {});
+  window.__bgm = el;
+  return el;
 }
 
-kick();
-el.addEventListener("canplay", kick);
-el.addEventListener("loadeddata", kick);
+const el = getPlayer();
+if (el.paused) el.play().catch(() => {});
 
-export function updateMusic() {
-  if (el.paused) kick();
-}
-
-export function primeMusic() {
-  kick();
-}
+export function updateMusic() {}
 
 export function musicDebug() {
   return {
