@@ -213,8 +213,11 @@ const explosions = [];
 let shake = 0;
 const matePos = new Vector3();
 const mateQuat = new Quaternion();
+const mateScale = new Vector3();
 const mateUp = new Vector3();
 const MATE_MARKER_MS = 10000;
+const MATE_INTERP_MS = 130;
+const MATE_SEND_MS = 40;
 const PLAYER_COLORS = ["#7ec8e3", "#e37e7e", "#9dce6a", "#d4a5f5", "#f0c36e", "#6ec8c1"];
 
 const mp = {
@@ -239,6 +242,7 @@ const mp = {
   waitingGo: false,
   truth: null,
   lastPoseAt: 0,
+  poseSeq: 0,
   snapInfo: new Map(),
   rematch: new Set(),
   launching: false,
@@ -684,22 +688,7 @@ function handleNetData(data, fromId) {
   } else if (data.t === "pose") {
     const id = data.from;
     if (!id || id === mp.myId) return;
-    const prev = mp.poses.get(id);
-    mp.poses.set(id, {
-      lat: data.lat,
-      lon: data.lon,
-      h: data.h,
-      heading: data.heading,
-      pitch: data.pitch,
-      roll: data.roll,
-      plane: data.plane,
-      showLat: prev?.showLat ?? data.lat,
-      showLon: prev?.showLon ?? data.lon,
-      showH: prev?.showH ?? data.h,
-      showHeading: prev?.showHeading ?? data.heading,
-      showPitch: prev?.showPitch ?? data.pitch,
-      showRoll: prev?.showRoll ?? data.roll,
-    });
+    pushMatePose(id, data);
     loadMate(id, data.plane || "pa28");
   } else if (data.t === "guess") {
     const id = data.from;
@@ -936,24 +925,42 @@ function lerpAngle(a, b, t) {
   return a + d * t;
 }
 
+function pushMatePose(id, data) {
+  const seq = data.seq ?? 0;
+  let track = mp.poses.get(id);
+  if (!track) {
+    track = { seq: -1, samples: [], clockOff: null, plane: data.plane };
+    mp.poses.set(id, track);
+  }
+  if (seq && seq <= track.seq) return;
+  if (seq) track.seq = seq;
+  if (data.plane) track.plane = data.plane;
+  const localNow = performance.now();
+  const senderAt = typeof data.at === "number" ? data.at : localNow;
+  if (track.clockOff == null) track.clockOff = localNow - senderAt;
+  else track.clockOff += (localNow - senderAt - track.clockOff) * 0.04;
+  const last = track.samples[track.samples.length - 1];
+  const at = Math.max(senderAt + track.clockOff, last ? last.at + 1 : 0);
+  track.samples.push({
+    at,
+    lat: data.lat,
+    lon: data.lon,
+    h: data.h,
+    heading: data.heading,
+    pitch: data.pitch,
+    roll: data.roll,
+  });
+  if (track.samples.length > 24) track.samples.splice(0, track.samples.length - 24);
+}
+
 function seedMatePose(id, lat, lon, h, planeKey) {
   if (!id || id === mp.myId) return;
   loadMate(id, planeKey || "pa28");
-  const prev = mp.poses.get(id);
   mp.poses.set(id, {
-    lat,
-    lon,
-    h,
-    heading: 0,
-    pitch: 0,
-    roll: 0,
+    seq: -1,
+    samples: [{ at: performance.now(), lat, lon, h, heading: 0, pitch: 0, roll: 0 }],
+    clockOff: null,
     plane: planeKey,
-    showLat: prev?.showLat ?? lat,
-    showLon: prev?.showLon ?? lon,
-    showH: prev?.showH ?? h,
-    showHeading: prev?.showHeading ?? 0,
-    showPitch: prev?.showPitch ?? 0,
-    showRoll: prev?.showRoll ?? 0,
   });
 }
 
@@ -997,6 +1004,7 @@ async function startMpFlight(msg) {
   mp.active = true;
   mp.guesses.clear();
   mp.poses.clear();
+  mp.poseSeq = 0;
   mp.truth = { lat: msg.lat, lon: msg.lon };
   mp.seats = msg.seats || {};
   mp.snapped = new Set();
@@ -1932,11 +1940,14 @@ function animate() {
 
   if (mp.active && !menuOpen && !guessOpen && !crashed) {
     const now = performance.now();
-    if (now - mp.lastPoseAt > 50) {
+    if (now - mp.lastPoseAt > MATE_SEND_MS) {
       mp.lastPoseAt = now;
+      mp.poseSeq += 1;
       mp.net?.send({
         t: "pose",
         from: mp.myId,
+        seq: mp.poseSeq,
+        at: now,
         lat: plane.latDeg,
         lon: plane.lonDeg,
         h: plane.height,
@@ -1949,35 +1960,50 @@ function animate() {
   }
   if (mp.active && !menuOpen) {
     const deg = Math.PI / 180;
-    const follow = 1 - Math.exp(-14 * dt);
-    for (const [id, pose] of mp.poses) {
+    const renderAt = performance.now() - MATE_INTERP_MS;
+    for (const [id, track] of mp.poses) {
       if (id === mp.myId) continue;
-      if (!mp.mates.get(id)?.mesh) loadMate(id, pose.plane || "pa28");
+      const samples = track.samples;
+      if (!mp.mates.get(id)?.mesh) loadMate(id, track.plane || "pa28");
       const mate = mp.mates.get(id);
-      if (!mate?.mesh) continue;
-      pose.showLat += (pose.lat - pose.showLat) * follow;
-      pose.showLon += (pose.lon - pose.showLon) * follow;
-      pose.showH += (pose.h - pose.showH) * follow;
-      pose.showHeading = lerpAngle(pose.showHeading, pose.heading, follow);
-      pose.showPitch += (pose.pitch - pose.showPitch) * follow;
-      pose.showRoll += (pose.roll - pose.showRoll) * follow;
+      if (!mate?.mesh || !samples?.length) continue;
+      let from = samples[0];
+      let to = samples[samples.length - 1];
+      let u = 1;
+      if (renderAt <= samples[0].at) {
+        to = from;
+        u = 0;
+      } else if (renderAt >= to.at) {
+        from = to;
+        u = 1;
+      } else {
+        for (let i = 1; i < samples.length; i++) {
+          if (samples[i].at >= renderAt) {
+            from = samples[i - 1];
+            to = samples[i];
+            u = (renderAt - from.at) / Math.max(1, to.at - from.at);
+            break;
+          }
+        }
+      }
       const mm = frameAt(
-        pose.showLat * deg,
-        pose.showLon * deg,
-        pose.showH,
-        pose.showHeading,
-        pose.showPitch,
-        -pose.showRoll
+        (from.lat + (to.lat - from.lat) * u) * deg,
+        (from.lon + (to.lon - from.lon) * u) * deg,
+        from.h + (to.h - from.h) * u,
+        lerpAngle(from.heading, to.heading, u),
+        from.pitch + (to.pitch - from.pitch) * u,
+        -(from.roll + (to.roll - from.roll) * u)
       );
-      mm.decompose(matePos, mateQuat, mate.mesh.scale);
+      mm.decompose(matePos, mateQuat, mateScale);
       mate.mesh.position.copy(matePos);
       mate.mesh.quaternion.copy(mateQuat);
+      mate.mesh.scale.copy(mateScale);
       mate.mesh.visible = true;
       const marker = ensureMateMarker(mate);
       const markOn = mp.goAt && performance.now() - mp.goAt < MATE_MARKER_MS;
       mateUp.set(0, 1, 0).applyQuaternion(mateQuat).normalize();
-      marker.scale.copy(mate.mesh.scale);
-      marker.position.copy(matePos).addScaledVector(mateUp, 18 * (mate.mesh.scale.y || 1));
+      marker.scale.copy(mateScale);
+      marker.position.copy(matePos).addScaledVector(mateUp, 18 * (mateScale.y || 1));
       marker.quaternion.copy(mateQuat);
       marker.visible = markOn && Math.sin(performance.now() * 0.014) > 0;
     }
@@ -2143,6 +2169,7 @@ function animate() {
       visible: !!mate.mesh?.visible,
       dist: mate.mesh ? Math.round(mate.mesh.position.distanceTo(planePos)) : -1,
       hasPose: mp.poses.has(id),
+      samples: mp.poses.get(id)?.samples?.length || 0,
     });
   }
   window.__dbg = {
