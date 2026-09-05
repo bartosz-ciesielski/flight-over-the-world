@@ -19,11 +19,11 @@ Fly over photorealistic Earth – guess the region, find your way home, or just 
   </tr>
   <tr>
     <td><img src="docs/screens/06-ny.png" alt="Flight over New York" /></td>
-    <td><img src="docs/screens/05-pauza.png" alt="Paused" /></td>
+    <td><img src="docs/screens/05-crash.png" alt="Crash" /></td>
   </tr>
   <tr>
     <td align="center">Fly anywhere</td>
-    <td align="center">Paused in flight</td>
+    <td align="center">Stay careful :)</td>
   </tr>
 </table>
 
