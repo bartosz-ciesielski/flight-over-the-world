@@ -245,7 +245,14 @@ export class TileKeyPool {
       const u = new URL(url, "https://tile.googleapis.com");
       if (u.hostname !== "tile.googleapis.com") return url;
       if (auth.key) u.searchParams.set("key", auth.key);
-      if (auth.session) u.searchParams.set("session", auth.session);
+      // Google rejects root.json when a session query is present (HTTP 400).
+      const path = u.pathname;
+      const needsSession =
+        u.searchParams.has("session") ||
+        path.includes("/files/") ||
+        /\.glb$/i.test(path);
+      if (auth.session && needsSession) u.searchParams.set("session", auth.session);
+      else u.searchParams.delete("session");
       return u.toString();
     } catch {
       return url;
