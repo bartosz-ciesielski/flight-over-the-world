@@ -2,6 +2,8 @@
 
 Lot nad fotorealistyczną Ziemią — zgadnij region, doleć do domu albo po prostu lataj. Single player i multiplayer.
 
+![Lot nad Paryżem](docs/screens/00-paryz.png)
+
 ![Lot nad polami](docs/screens/04-lot.png)
 
 ## Ekrany
