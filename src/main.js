@@ -1727,6 +1727,39 @@ function init() {
   camera = new PerspectiveCamera(70, innerWidth / innerHeight, 0.5, 1e8);
 
   tiles = new TilesRenderer();
+  let tileRetryAt = 0;
+  tiles.registerPlugin({
+    name: "TILE_RETRY_PLUGIN",
+    priority: -100,
+    tiles: null,
+    init(t) {
+      this.tiles = t;
+    },
+    async fetchData(url, options) {
+      const fetchOnce = () => {
+        const g = this.tiles.getPluginByName("GOOGLE_CLOUD_AUTH_PLUGIN");
+        if (g?.auth) g.auth.autoRefreshToken = false;
+        if (g?.fetchData) return g.fetchData(url, options);
+        const ion = this.tiles.getPluginByName("CESIUM_ION_AUTH_PLUGIN");
+        if (ion?.auth) return ion.auth.fetch(url, options);
+        return fetch(url, options);
+      };
+      let last;
+      for (let i = 0; i < 5; i++) {
+        try {
+          last = await fetchOnce();
+          if (!(last instanceof Response) || last.ok || last.status !== 429) return last;
+        } catch (err) {
+          last = err;
+          if (!String(err?.message || "").includes("429")) throw err;
+        }
+        await new Promise((r) => setTimeout(r, Math.min(12000, 700 * 2 ** i)));
+        if (options?.signal?.aborted) break;
+      }
+      if (last instanceof Response) return last;
+      throw last;
+    },
+  });
   if (ION_KEY) {
     tiles.registerPlugin(
       new CesiumIonAuthPlugin({
@@ -1754,9 +1787,18 @@ function init() {
   tiles.lruCache.maxSize = isMobile ? 1600 : 3000;
   tiles.lruCache.maxBytesSize = isMobile ? 2.8e8 : 1.5e9;
   if (isMobile) tiles.loadSiblings = false;
+  tiles.downloadQueue.maxJobsPerOrigin = 10;
 
   // czytelny komunikat zamiast wiecznego ładowania
-  tiles.addEventListener("load-error", () => {
+  tiles.addEventListener("load-error", (ev) => {
+    const msg = String(ev?.error?.message || "");
+    if (msg.includes("429")) {
+      const when = performance.now();
+      if (when >= tileRetryAt) {
+        tileRetryAt = when + 4000;
+        setTimeout(() => tiles.resetFailedTiles(), 2500);
+      }
+    }
     if (!loaderDismissed) {
       loadError = ION_KEY
         ? "Cesium ion is not responding – check VITE_CESIUM_ION_KEY"
