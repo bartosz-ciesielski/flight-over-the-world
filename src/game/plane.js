@@ -156,19 +156,22 @@ export class PlaneController {
     this.boost = spec.boost ?? 85;
     this.brake = spec.brake ?? 30;
     this.speed = this.cruise; // m/s
+    const span = Math.max(1, this.boost - this.brake);
+    this.throttle = Math.max(0, Math.min(1, (this.cruise - this.brake) / span));
     this.crashed = false;
   }
 
   update(dt, ctrl) {
-    // ctrl: roll -1..1 (prawo +), pitch -1..1 (w górę +), throttle -1..1
+    // ctrl: roll -1..1 (prawo +), pitch -1..1 (w górę +), throttle -1..1 (dźwignia)
     const targetRoll = -ctrl.roll * 0.9;
     const targetPitch = ctrl.pitch * 0.4;
     this.roll += (targetRoll - this.roll) * Math.min(1, 6 * dt);
     this.pitch += (targetPitch - this.pitch) * Math.min(1, 4 * dt);
 
-    const targetSpeed =
-      ctrl.throttle > 0 ? this.boost : ctrl.throttle < 0 ? this.brake : this.cruise;
-    this.speed += (targetSpeed - this.speed) * Math.min(1, 0.8 * dt);
+    if (ctrl.throttle > 0) this.throttle = Math.min(1, this.throttle + 0.3 * dt);
+    else if (ctrl.throttle < 0) this.throttle = Math.max(0, this.throttle - 0.3 * dt);
+    const targetSpeed = this.brake + this.throttle * (this.boost - this.brake);
+    this.speed += (targetSpeed - this.speed) * Math.min(1, 1.15 * dt);
 
     // zakręt przez przechylenie
     this.heading += -Math.sin(this.roll) * (this.speed / 55) * dt * 0.85;

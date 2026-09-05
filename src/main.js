@@ -146,47 +146,47 @@ const PLANES = {
   pa28: {
     file: asset("models/pa28.glb"),
     wingspan: 11,
-    cruise: 48, boost: 85, brake: 30,
+    cruise: 48, boost: 130, brake: 30,
     cam: [0, 5.5, 15],
     name: "Piper PA-28",
-    desc: "Light propeller – 170 km/h",
+    desc: "Light propeller – cruise 170, max 470 km/h",
     sound: "plane",
   },
   q400: {
     file: asset("models/q400.glb"),
     wingspan: 28,
-    cruise: 75, boost: 115, brake: 45,
+    cruise: 75, boost: 185, brake: 45,
     cam: [0, 9, 32],
     name: "Dash 8 Q400",
-    desc: "Regional turboprop – 270 km/h",
+    desc: "Regional turboprop – cruise 270, max 670 km/h",
     sound: "plane",
   },
   citation: {
     file: asset("models/citation.glb"),
     wingspan: 16,
-    cruise: 92, boost: 150, brake: 55,
+    cruise: 92, boost: 250, brake: 55,
     cam: [0, 7, 24],
     name: "Cessna Citation",
-    desc: "Business jet – 330 km/h",
+    desc: "Business jet – cruise 330, max 900 km/h",
     sound: "jet",
   },
   jet: {
     file: asset("models/jet.glb"),
     wingspan: 10,
-    cruise: 150, boost: 260, brake: 80,
+    cruise: 150, boost: 420, brake: 80,
     cam: [0, 6, 19],
     name: "Fighter",
-    desc: "Combat jet – 540 km/h",
+    desc: "Combat jet – cruise 540, max 1510 km/h",
     sound: "jet",
     prepare: prepareJet,
   },
   rocket: {
     file: asset("models/rocket.glb"),
     wingspan: 12,
-    cruise: 220, boost: 380, brake: 120,
+    cruise: 220, boost: 600, brake: 120,
     cam: [0, 6, 20],
     name: "Rocket",
-    desc: "Space rocket – 790 km/h",
+    desc: "Space rocket – cruise 790, max 2160 km/h",
     sound: "rocket",
     prepare: prepareRocket,
   },
@@ -2391,10 +2391,7 @@ function tickFrame() {
   const speed01 = plane.speed / plane.boost;
   const rpm01 = Math.min(
     1,
-    Math.max(
-      0.15,
-      0.3 + speed01 * 0.5 + (ctrl.throttle > 0 ? 0.3 : ctrl.throttle < 0 ? -0.18 : 0)
-    )
+    Math.max(0.15, 0.22 + plane.throttle * 0.78)
   );
   updateEngineSound(flying, rpm01, speed01, PLANES[selectedPlane].sound);
   updateMusic();
