@@ -2,6 +2,8 @@
 
 Fly over photorealistic Earth – guess the region, find your way home, or just explore. Single player and multiplayer.
 
+**Play:** https://bartosz-ciesielski.github.io/flight-over-the-world/
+
 ![Flight over Paris](docs/screens/00-paryz.png)
 
 ![Flight over the fields](docs/screens/04-lot.png)
