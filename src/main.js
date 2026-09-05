@@ -68,6 +68,7 @@ import {
   createBeacon,
   loadPolandGeo,
   randomPointInPoland,
+  pickGuessStart,
   drawPolandMap,
   unprojectPL,
   loadEuropeGeo,
@@ -203,6 +204,33 @@ const isMobile =
   typeof navigator !== "undefined" &&
   (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ||
     (navigator.maxTouchPoints > 1 && matchMedia("(pointer: coarse)").matches));
+const START_FLAG = "fotw_starting";
+const LAST_ERR = "fotw_lasterr";
+function markStarting() {
+  try { sessionStorage.setItem(START_FLAG, String(Date.now())); } catch { /* ignore */ }
+}
+function clearStarting() {
+  try { sessionStorage.removeItem(START_FLAG); } catch { /* ignore */ }
+}
+function crashedLastStart() {
+  try {
+    const t = Number(sessionStorage.getItem(START_FLAG) || 0);
+    return t > 0 && Date.now() - t < 60000;
+  } catch {
+    return false;
+  }
+}
+function rememberError(msg) {
+  try { sessionStorage.setItem(LAST_ERR, String(msg || "").slice(0, 280)); } catch { /* ignore */ }
+}
+function lastError() {
+  try { return sessionStorage.getItem(LAST_ERR) || ""; } catch { return ""; }
+}
+function clearError() {
+  try { sessionStorage.removeItem(LAST_ERR); } catch { /* ignore */ }
+}
+const liteMode = isMobile || crashedLastStart();
+if (liteMode) document.body.classList.add("lite");
 let loadError = null;
 let frameCount = 0;
 let selectedPlane = "pa28";
@@ -354,6 +382,10 @@ const el = {
   lobbyCarNext: document.getElementById("lobby-car-next"),
   lobbyCarName: document.getElementById("lobby-car-name"),
   lobbyCarDesc: document.getElementById("lobby-car-desc"),
+  fatal: document.getElementById("fatal"),
+  fatalText: document.getElementById("fatal-text"),
+  fatalOk: document.getElementById("fatal-ok"),
+  crashNote: document.getElementById("crash-note"),
 };
 
 // karuzela pojazdów — jeden duży podgląd, strzałki w bok
@@ -364,7 +396,8 @@ const carousel = createCarousel(
     file: PLANES[k].file,
     wingspan: PLANES[k].wingspan,
     prepare: PLANES[k].prepare,
-  }))
+  })),
+  { lite: liteMode }
 );
 const lobbyCarousel = createCarousel(
   el.lobbyCarCanvas,
@@ -373,7 +406,8 @@ const lobbyCarousel = createCarousel(
     file: PLANES[k].file,
     wingspan: PLANES[k].wingspan,
     prepare: PLANES[k].prepare,
-  }))
+  })),
+  { lite: liteMode }
 );
 let planeIdx = 0;
 function selectPlane(i, dir, silent = false) {
@@ -433,6 +467,40 @@ document.querySelectorAll("#menu .scope-btn").forEach((btn) => {
   });
 });
 selectMode("guess");
+
+function showFatal(msg) {
+  const text = msg || "Could not start on this phone.";
+  rememberError(text);
+  if (el.fatalText) el.fatalText.textContent = text;
+  if (el.fatal) el.fatal.classList.remove("hidden");
+  if (el.crashNote) {
+    el.crashNote.hidden = false;
+    el.crashNote.textContent = text;
+  }
+  if (el.menuError) el.menuError.textContent = text;
+}
+
+function hideFatal() {
+  if (el.fatal) el.fatal.classList.add("hidden");
+}
+
+function showCrashHints() {
+  const died = crashedLastStart();
+  const prev = lastError();
+  if (!died && !prev) return;
+  const text = died
+    ? (prev || "Last start crashed this phone (usually out of memory). Using the lightest graphics — tap Start again.")
+    : prev;
+  if (el.crashNote) {
+    el.crashNote.hidden = false;
+    el.crashNote.textContent = text;
+  }
+  if (el.menuError) el.menuError.textContent = text;
+  if (died) showFatal(text);
+}
+
+el.fatalOk?.addEventListener("click", () => hideFatal());
+showCrashHints();
 
 function showLanding() {
   closeRoom();
@@ -993,8 +1061,7 @@ async function launchMpRound() {
     if (mode === "guess") {
       const scope = GUESS_SCOPES[guessScope];
       setLobbyStatus(scope.status);
-      geoCache = await scope.load();
-      const p = scope.random(geoCache);
+      const p = pickGuessStart(guessScope);
       const msg = { t: "start", mode, lat: p.lat, lon: p.lon, scope: guessScope, seats: buildSeats() };
       mp.net?.send(msg);
       startMpFlight(msg);
@@ -1171,9 +1238,6 @@ async function startMpFlight(msg) {
   el.lobbyStart.disabled = false;
   setLobbyStatus("Loading terrain… waiting for everyone");
   showMpWait("Loading terrain… waiting for everyone");
-  if (mode === "guess" && !geoCache) {
-    GUESS_SCOPES[guessScope].load().then((g) => { geoCache = g; }).catch(() => {});
-  }
   const seat = mp.seats[mp.myId] ?? 0;
   const total = Object.keys(mp.seats).length || 1;
   const spawn = offsetByIndex(msg.lat, msg.lon, seat, total);
@@ -1405,24 +1469,24 @@ function init() {
   scene.fog = new FogExp2(0x9dd0ea, 0.00007);
 
   renderer = new WebGLRenderer({
-    antialias: !isMobile,
-    powerPreference: isMobile ? "default" : "high-performance",
+    antialias: !liteMode,
+    powerPreference: liteMode ? "low-power" : "high-performance",
     alpha: false,
   });
   renderer.setClearColor(0x8ec8e8);
-  renderer.setPixelRatio(Math.min(devicePixelRatio, isMobile ? 1.25 : 2));
+  applyPixelRatio();
   renderer.setSize(innerWidth, innerHeight);
-  renderer.toneMapping = 4;
+  renderer.toneMapping = liteMode ? 0 : 4; // NoToneMapping on phones
   renderer.toneMappingExposure = 1.1;
-  renderer.shadowMap.enabled = !isMobile;
+  renderer.shadowMap.enabled = !liteMode;
   renderer.shadowMap.type = 2; // PCFSoft
   renderer.domElement.id = "game-canvas";
   document.body.appendChild(renderer.domElement);
 
   scene.add(new HemisphereLight(0xbfd8ee, 0x5a7048, 1.15));
   sun = new DirectionalLight(0xfff2dd, 2.0);
-  sun.castShadow = !isMobile;
-  sun.shadow.mapSize.set(isMobile ? 512 : 2048, isMobile ? 512 : 2048);
+  sun.castShadow = !liteMode;
+  sun.shadow.mapSize.set(liteMode ? 512 : 2048, liteMode ? 512 : 2048);
   sun.shadow.camera.near = 1;
   sun.shadow.camera.far = 2500;
   sun.shadow.camera.left = -450;
@@ -1451,7 +1515,7 @@ function init() {
   tiles.registerPlugin(new TileCompressionPlugin());
   tiles.registerPlugin(new UpdateOnChangePlugin());
   tiles.registerPlugin(new UnloadTilesPlugin());
-  tiles.registerPlugin(new TilesFadePlugin());
+  if (!liteMode) tiles.registerPlugin(new TilesFadePlugin());
   const draco = new DRACOLoader();
   draco.setDecoderPath("https://www.gstatic.com/draco/versioned/decoders/1.5.7/");
   tiles.registerPlugin(new GLTFExtensionsPlugin({ dracoLoader: draco }));
@@ -1460,9 +1524,9 @@ function init() {
   scene.add(tiles.group);
   tiles.setResolutionFromRenderer(camera, renderer);
   tiles.setCamera(camera);
-  tiles.errorTarget = isMobile ? 16 : 10;
-  tiles.lruCache.maxSize = isMobile ? 800 : 3000;
-  tiles.lruCache.maxBytesSize = isMobile ? 2.5e8 : 1.5e9;
+  tiles.errorTarget = liteMode ? 36 : 10;
+  tiles.lruCache.maxSize = liteMode ? 160 : 3000;
+  tiles.lruCache.maxBytesSize = liteMode ? 3.2e7 : 1.5e9;
 
   // czytelny komunikat zamiast wiecznego ładowania
   tiles.addEventListener("load-error", () => {
@@ -1482,21 +1546,28 @@ function init() {
 
   // niebo — proceduralna kopuła (gradient + słońce + chmury FBM),
   // horyzont = dokładnie kolor mgły, więc nie ma przerwy ani poświaty
-  sky = createSky(0x9dd0ea);
+  sky = createSky(0x9dd0ea, { simple: liteMode });
   scene.add(sky.mesh);
 
-  // panorama HDRI tylko jako źródło światła otoczenia (IBL), nie jako tło
-  new TextureLoader().load(asset("textures/sky_day.jpg"), (tex) => {
-    tex.mapping = EquirectangularReflectionMapping;
-    tex.colorSpace = SRGBColorSpace;
-    scene.environment = tex;
-  });
+  if (!liteMode) {
+    new TextureLoader().load(asset("textures/sky_day.jpg"), (tex) => {
+      tex.mapping = EquirectangularReflectionMapping;
+      tex.colorSpace = SRGBColorSpace;
+      scene.environment = tex;
+    });
+  }
 
   beacon = createBeacon();
   beacon.visible = false;
   scene.add(beacon);
 
-  loadPlane(selectedPlane);
+  if (!liteMode) loadPlane(selectedPlane);
+  else {
+    planeMesh = createPlaneMesh();
+    planeMesh.userData.key = "";
+    planeMesh.visible = false;
+    scene.add(planeMesh);
+  }
   resetFlight(startLat, startLon);
   if (planeMesh) planeMesh.visible = false;
   loaderDismissed = true;
@@ -1506,13 +1577,17 @@ function init() {
   renderer.domElement.addEventListener("webglcontextlost", (e) => {
     e.preventDefault();
     window.__ctxLost = true;
+    showFatal("Graphics memory ran out on this phone (WebGL). Close other tabs and tap Start again, or use a computer.");
   });
   window.__game = { get planeMesh() { return planeMesh; }, get plane() { return plane; }, get camera() { return camera; } };
   window.__scene = scene;
   gameReady = true;
+  showCrashHints();
   } catch (err) {
     console.error(err);
-    setLoader("This phone could not start the 3D engine. Try Safari or Chrome, or a computer.", 0);
+    const msg = "This phone could not start the 3D engine. Try Safari or Chrome, or a computer.";
+    setLoader(msg, 0);
+    showFatal(err?.message ? `${msg} (${err.message})` : msg);
   }
 }
 
@@ -1523,6 +1598,7 @@ function loadPlane(key) {
   planeMesh = createPlaneMesh(); // fallback na czas ładowania
   planeMesh.userData.key = key;
   scene.add(planeMesh);
+  if (liteMode) return;
 
   new GLTFLoader().load(spec.file, (gltf) => {
     const model = gltf.scene;
@@ -1647,11 +1723,17 @@ function resetFlight(latDeg, lonDeg) {
   hideBanner();
 }
 
+function applyPixelRatio() {
+  if (!renderer) return;
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, liteMode ? 1 : 2));
+}
+
 function onResize() {
+  if (!camera || !renderer) return;
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
+  applyPixelRatio();
   renderer.setSize(innerWidth, innerHeight);
-  renderer.setPixelRatio(devicePixelRatio);
 }
 
 function frameAt(lat, lon, height, az, elv, roll) {
@@ -1762,10 +1844,7 @@ async function startGame() {
       beginFlight(start.lat, start.lon);
       placeBeaconAt(loc.lat, loc.lon);
     } else {
-      const scope = GUESS_SCOPES[guessScope];
-      el.menuError.textContent = scope.status;
-      geoCache = await scope.load();
-      const p = scope.random(geoCache);
+      const p = pickGuessStart(guessScope);
       timeLeft = GUESS_TIME;
       timerActive = false; // włączy się po dosadzeniu (finishSnapStart)
       beginFlight(p.lat, p.lon);
@@ -1779,11 +1858,23 @@ async function startGame() {
 function menuFail(msg) {
   el.menuError.textContent = msg;
   el.start.disabled = false;
+  rememberError(msg);
+}
+
+function sleepPreviews() {
+  carousel.setActive(false);
+  lobbyCarousel.setActive(false);
+  if (liteMode) {
+    carousel.dispose();
+    lobbyCarousel.dispose();
+  }
 }
 
 function beginFlight(lat, lon) {
-  el.menuError.textContent = "";
-  if (selectedPlane !== planeMesh?.userData?.key) loadPlane(selectedPlane);
+  markStarting();
+  sleepPreviews();
+  el.menuError.textContent = liteMode ? "Loading terrain (light mode)…" : "Loading terrain…";
+  if (!liteMode && selectedPlane !== planeMesh?.userData?.key) loadPlane(selectedPlane);
   resetFlight(lat, lon);
   el.timerBox.classList.toggle("show", mode !== "free");
   el.distBox.classList.remove("show");
@@ -1791,7 +1882,6 @@ function beginFlight(lat, lon) {
   // a samolot nie jest szarpany dosadzeniem w trakcie sterowania
   awaitingSnap = true;
   awaitingSnapSince = performance.now();
-  el.menuError.textContent = "Loading terrain…";
 }
 
 // wywoływane gdy teren zmierzony — właściwy start gry
@@ -1807,6 +1897,8 @@ function finishSnapStart() {
   carousel.setActive(false);
   hideMpWait();
   timerActive = mode !== "free";
+  clearError();
+  setTimeout(clearStarting, 2500);
 }
 
 function unlockAudio() {
@@ -1903,6 +1995,7 @@ function backToMenu() {
 
 // --- mapa zgadywania ---
 function drawGuessMap(marks = []) {
+  if (!geoCache) return;
   GUESS_SCOPES[guessScope].draw(el.gmCanvas, geoCache, marks);
 }
 
@@ -1920,7 +2013,23 @@ function openGuessMap() {
     ? "Click where you were dropped – closest guess wins"
     : GUESS_SCOPES[guessScope].sub;
   el.guessmap.classList.add("show");
-  requestAnimationFrame(() => drawGuessMap());
+  const draw = () => requestAnimationFrame(() => drawGuessMap());
+  if (geoCache) {
+    draw();
+    return;
+  }
+  el.gmSub.textContent = "Loading map…";
+  GUESS_SCOPES[guessScope].load()
+    .then((g) => {
+      geoCache = g;
+      el.gmSub.textContent = mp.active
+        ? "Click where you were dropped – closest guess wins"
+        : GUESS_SCOPES[guessScope].sub;
+      draw();
+    })
+    .catch(() => {
+      el.gmResult.textContent = "Could not load the map";
+    });
 }
 
 function maybeRevealGuesses() {
@@ -2165,8 +2274,8 @@ function restartMode() {
     awaitingSnapSince = performance.now();
     resetFlight(startLat, startLon);
     placeBeaconAt(homeTarget.lat, homeTarget.lon);
-  } else if (mode === "guess" && geoCache) {
-    const p = GUESS_SCOPES[guessScope].random(geoCache);
+  } else if (mode === "guess") {
+    const p = pickGuessStart(guessScope);
     timeLeft = GUESS_TIME;
     timerActive = false; // włączy się po dosadzeniu (finishSnapStart)
     awaitingSnap = true;
@@ -2195,8 +2304,40 @@ let camInit = false;
 init();
 animate();
 
+window.addEventListener("error", (e) => {
+  const msg = e.message || "Unexpected error";
+  if (!msg || msg === "Script error.") return;
+  rememberError(msg);
+  if (awaitingSnap || !menuOpen) showFatal(msg);
+  else if (el.menuError) el.menuError.textContent = msg;
+});
+window.addEventListener("unhandledrejection", (e) => {
+  const msg = String(e.reason?.message || e.reason || "Unexpected error");
+  rememberError(msg);
+  if (awaitingSnap || !menuOpen) showFatal(msg);
+  else if (el.menuError) el.menuError.textContent = msg;
+});
+window.addEventListener("pagehide", () => {
+  try {
+    if (sessionStorage.getItem(START_FLAG)) {
+      rememberError("Phone closed the tab while loading terrain — usually out of memory. Light mode is on; tap Start again.");
+    }
+  } catch {
+    /* ignore */
+  }
+});
+
 function animate() {
   requestAnimationFrame(animate);
+  try {
+    tickFrame();
+  } catch (err) {
+    console.error(err);
+    showFatal(err?.message || "The game crashed while drawing a frame");
+  }
+}
+
+function tickFrame() {
   if (!tiles || !plane) return;
 
   const dt = Math.min(clock.getDelta(), 0.05);
@@ -2350,7 +2491,7 @@ function animate() {
   sun.target.position.copy(planePos);
   sun.target.updateMatrixWorld();
 
-  if (!menuOpen && frameCount % 15 === 0) {
+  if (!liteMode && !menuOpen && frameCount % 15 === 0) {
     tiles.group.traverse((o) => {
       if (o.isMesh && !o.castShadow) {
         o.castShadow = true;

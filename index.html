@@ -16,6 +16,14 @@
   </head>
   <body>
     <audio id="bgm" autoplay loop playsinline preload="auto" src="./music/theme.mp3"></audio>
+    <div id="fatal" class="hidden">
+      <div class="fatal-card">
+        <h2>Could not start</h2>
+        <p id="fatal-text"></p>
+        <button id="fatal-ok" type="button">OK</button>
+      </div>
+    </div>
+
     <div id="loader">
       <div class="loader-card">
         <h2>Flight Over the World</h2>
@@ -29,6 +37,7 @@
       <div class="menu-card landing-card">
         <h1>Flight Over the World</h1>
         <p class="landing-sub">Choose a game mode</p>
+        <p id="crash-note" hidden></p>
         <div class="landing-modes">
           <button id="btn-solo" type="button">Single player</button>
           <button id="btn-multi" type="button">Multiplayer</button>

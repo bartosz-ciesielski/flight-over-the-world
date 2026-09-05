@@ -6,7 +6,7 @@ export const SUN_DIR = new Vector3(-0.52, 0.62, 0.26).normalize();
 // Proceduralne niebo: gradient zenit→horyzont + tarcza słońca + chmury FBM.
 // Horyzont ma DOKŁADNIE kolor mgły (w przestrzeni liniowej, przez ten sam
 // tone mapping ACES co teren), więc nie ma żadnej przerwy ani poświaty.
-export function createSky(fogColorHex) {
+export function createSky(fogColorHex, { simple = false } = {}) {
   const uniforms = {
     uZenith: { value: new Color(0x2a63b8) },
     uMid: { value: new Color(0x7db3e2) },
@@ -37,6 +37,7 @@ export function createSky(fogColorHex) {
       uniform vec3 uSunColor;
       uniform float uTime;
 
+      ${simple ? "" : `
       float hash(vec2 p) {
         return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
       }
@@ -58,6 +59,7 @@ export function createSky(fogColorHex) {
         }
         return v;
       }
+      `}
 
       void main() {
         vec3 d = normalize(vDir);
@@ -73,6 +75,7 @@ export function createSky(fogColorHex) {
         float s = max(dot(d, uSunDir), 0.0);
         col += uSunColor * (pow(s, 1400.0) * 8.0 + pow(s, 48.0) * 0.25 + pow(s, 6.0) * 0.05);
 
+        ${simple ? "" : `
         // chmury — rzut kierunku na płaszczyznę, dryf w czasie
         if (h > 0.005) {
           vec2 cuv = d.xz / (h + 0.12) * 0.55;
@@ -86,6 +89,7 @@ export function createSky(fogColorHex) {
           cloud += uSunColor * pow(s, 4.0) * 0.22;
           col = mix(col, cloud, cov * fade * 0.85);
         }
+        `}
 
         gl_FragColor = vec4(col, 1.0);
         #include <tonemapping_fragment>
@@ -94,7 +98,7 @@ export function createSky(fogColorHex) {
     `,
   });
 
-  const mesh = new Mesh(new SphereGeometry(5e6, 48, 24), mat);
+  const mesh = new Mesh(new SphereGeometry(5e6, simple ? 16 : 48, simple ? 12 : 24), mat);
   mesh.frustumCulled = false;
   mesh.renderOrder = -100;
   return { mesh, uniforms };

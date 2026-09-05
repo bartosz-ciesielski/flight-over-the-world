@@ -11,7 +11,19 @@ import {
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
 // karuzela pojazdów w menu — jeden duży podgląd, strzałki przełączają model
-export function createCarousel(canvas, items) {
+export function createCarousel(canvas, items, opts = {}) {
+  if (opts.lite) {
+    return {
+      show() {},
+      resize() {},
+      setActive() {},
+      dispose() {},
+      get currentKey() {
+        return null;
+      },
+    };
+  }
+
   const renderer = new WebGLRenderer({ canvas, antialias: true, alpha: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.setClearColor(0x000000, 0);
@@ -96,9 +108,24 @@ export function createCarousel(canvas, items) {
   resize();
   window.addEventListener("resize", resize);
 
+  function dispose() {
+    active = false;
+    try {
+      renderer.dispose();
+      const gl = renderer.getContext();
+      const ext = gl && gl.getExtension("WEBGL_lose_context");
+      if (ext) ext.loseContext();
+    } catch {
+      /* ignore */
+    }
+    models.clear();
+    current = null;
+  }
+
   return {
     show,
     resize,
+    dispose,
     get currentKey() {
       return currentKey;
     },
