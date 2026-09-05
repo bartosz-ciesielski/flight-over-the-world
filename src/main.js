@@ -2386,7 +2386,16 @@ function tickFrame() {
   ctrl.pitch += (pitchIn - ctrl.pitch) * Math.min(1, 6 * dt);
   ctrl.throttle = touch.boost || keys.has("shift") ? 1 : touch.brake || keys.has("control") ? -1 : 0;
 
-  if (flying) plane.update(dt, ctrl);
+  if (flying) {
+    // równe kroki — duży dt przy ładowaniu kafelków nie robi „przeskoku” przy nitro
+    let left = dt;
+    const step = 1 / 60;
+    while (left > 0) {
+      const s = Math.min(step, left);
+      plane.update(s, ctrl);
+      left -= s;
+    }
+  }
 
   // dźwięk silnika — obroty z przepustnicy i prędkości, opływ z prędkości
   const speed01 = plane.speed / plane.boost;
@@ -2487,12 +2496,8 @@ function tickFrame() {
   const camFrame = frameAt(plane.lat, plane.lon, plane.height, plane.heading, 0, 0);
   camFrame.decompose(camFramePos, camFrameQuat, camFrameScale);
   offset.set(camOffset[0], camOffset[1], camOffset[2]).applyQuaternion(camFrameQuat).add(planePos);
-  if (!camInit) {
-    camPos.copy(offset);
-    camInit = true;
-  } else {
-    camPos.lerp(offset, 1 - Math.exp(-14 * dt));
-  }
+  camPos.copy(offset);
+  camInit = true;
   camera.position.copy(camPos);
   // trzęsienie kamery po wybuchu
   if (shake > 0) {
