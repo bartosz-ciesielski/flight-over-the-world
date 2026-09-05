@@ -23,6 +23,30 @@ html, body {
   height: 100%;
 }
 
+#voice-ind {
+  position: fixed;
+  top: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgba(18, 14, 10, 0.72);
+  border: 1px solid rgba(243, 234, 214, 0.18);
+  color: var(--paper);
+  font-size: 14px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+#voice-ind.hidden { display: none; }
+
+#voice-ind.live {
+  color: #1c1710;
+  background: var(--gold);
+  border-color: var(--gold);
+}
+
 #hud {
   pointer-events: none;
   position: fixed;

@@ -87,6 +87,17 @@ import {
   wasHosting,
   rememberHost,
 } from "./game/net.js";
+import {
+  bindVoice,
+  ensureMic,
+  setTalking,
+  isTalking,
+  voiceDenied,
+  answerCall,
+  syncVoiceCalls,
+  dropVoicePeer,
+  destroyVoice,
+} from "./game/voice.js";
 
 // zakresy trybu "Zgadnij region"
 const GUESS_SCOPES = {
@@ -248,6 +259,7 @@ const mp = {
   rematch: new Set(),
   launching: false,
   goAt: 0,
+  talkers: new Set(),
 };
 
 const ctrl = { roll: 0, pitch: 0, throttle: 0 };
@@ -305,6 +317,7 @@ const el = {
   lobbyScopes: document.getElementById("lobby-scopes"),
   lobbyModeDesc: document.getElementById("lobby-mode-desc"),
   lobbyCity: document.getElementById("lobby-city"),
+  voiceInd: document.getElementById("voice-ind"),
   lobbyCarCanvas: document.getElementById("lobby-carousel-canvas"),
   lobbyCarPrev: document.getElementById("lobby-car-prev"),
   lobbyCarNext: document.getElementById("lobby-car-next"),
@@ -422,6 +435,7 @@ function showLobby() {
   lobbyCarousel.setActive(true);
   applyLobbySetup();
   renderLobby();
+  updateVoiceUi();
 }
 
 function setLobbyStatus(msg, isErr = false) {
@@ -595,6 +609,77 @@ function selectLobbyMode(m, broadcast = false) {
 
 function attachNet(api) {
   mp.net = api;
+  bindVoice(api);
+}
+
+function voiceTargets() {
+  const ids = [];
+  if (!mp.host && mp.roomId) ids.push(mp.roomId);
+  for (const id of mp.players.keys()) ids.push(id);
+  return ids;
+}
+
+function refreshVoice() {
+  if (!mp.active || !mp.net) return;
+  syncVoiceCalls(voiceTargets());
+}
+
+let wantTalk = false;
+
+async function startTalk() {
+  if (!mp.active) return;
+  wantTalk = true;
+  if (isTalking()) return;
+  unlockAudio();
+  const mic = await ensureMic();
+  if (!mic) {
+    wantTalk = false;
+    updateVoiceUi();
+    return;
+  }
+  if (!wantTalk) return;
+  refreshVoice();
+  setTalking(true);
+  mp.net?.send({ t: "talk", on: true, from: mp.myId });
+  updateVoiceUi();
+}
+
+function stopTalk() {
+  wantTalk = false;
+  if (!isTalking()) return;
+  setTalking(false);
+  if (mp.active) mp.net?.send({ t: "talk", on: false, from: mp.myId });
+  updateVoiceUi();
+}
+
+function updateVoiceUi() {
+  const box = el.voiceInd;
+  if (!box) return;
+  if (!mp.active || !mp.net) {
+    box.classList.add("hidden");
+    return;
+  }
+  box.classList.remove("hidden");
+  box.classList.toggle("live", isTalking());
+  if (voiceDenied()) {
+    box.textContent = "Mikrofon zablokowany — pozwól na dostęp w przeglądarce";
+    return;
+  }
+  if (isTalking()) {
+    box.textContent = "Mówisz…";
+    return;
+  }
+  const who = [...mp.talkers].map((id) => playerName(id)).filter(Boolean);
+  box.textContent = who.length
+    ? `${who.join(", ")} mówi…`
+    : "Przytrzymaj T i mów";
+}
+
+async function handleVoiceCall(call) {
+  if (!call) return;
+  await ensureMic();
+  answerCall(call);
+  refreshVoice();
 }
 
 function handleNetData(data, fromId) {
@@ -629,6 +714,7 @@ function handleNetData(data, fromId) {
     });
     broadcastRoster();
     renderLobby();
+    refreshVoice();
   } else if (data.t === "welcome") {
     if (data.id) mp.myId = data.id;
     if (data.name) mp.myName = data.name;
@@ -640,6 +726,7 @@ function handleNetData(data, fromId) {
     applyRoster(data.roster);
     applyLobbySetup();
     renderLobby();
+    refreshVoice();
   } else if (data.t === "roster") {
     mp.roundActive = !!data.roundActive;
     if (data.scope) setLobbyScope(data.scope);
@@ -648,6 +735,7 @@ function handleNetData(data, fromId) {
     applyRoster(data.players);
     applyLobbySetup();
     renderLobby();
+    refreshVoice();
   } else if (data.t === "scope") {
     setLobbyScope(data.scope);
   } else if (data.t === "mode") {
@@ -667,6 +755,12 @@ function handleNetData(data, fromId) {
     if (id && mp.players.has(id)) mp.players.get(id).ready = !!data.ready;
     renderLobby();
     tryStartMp();
+  } else if (data.t === "talk") {
+    if (data.from && data.from !== mp.myId) {
+      if (data.on) mp.talkers.add(data.from);
+      else mp.talkers.delete(data.from);
+      updateVoiceUi();
+    }
   } else if (data.t === "snapped") {
     if (data.from) {
       mp.snapInfo.set(data.from, {
@@ -730,6 +824,11 @@ function handlePeerJoined() {
 }
 
 function handlePeerLeft(peerId) {
+  if (peerId) {
+    dropVoicePeer(peerId);
+    mp.talkers.delete(peerId);
+    updateVoiceUi();
+  }
   if (!peerId) {
     disposeAllMates();
     mp.players.clear();
@@ -787,6 +886,9 @@ function closeRoom() {
   mp.rematch.clear();
   mp.launching = false;
   hideMpWait();
+  mp.talkers.clear();
+  destroyVoice();
+  updateVoiceUi();
   disposeAllMates();
 }
 
@@ -810,6 +912,7 @@ function openHostLobby(existingId) {
     },
     onPeer: handlePeerJoined,
     onData: handleNetData,
+    onCall: handleVoiceCall,
     onLeft: handlePeerLeft,
     onError: handleNetError,
   }, existingId);
@@ -836,6 +939,7 @@ function openGuestLobby(id) {
     },
     onPeer: handlePeerJoined,
     onData: handleNetData,
+    onCall: handleVoiceCall,
     onLeft: handlePeerLeft,
     onError: handleNetError,
   });
@@ -1899,12 +2003,22 @@ window.addEventListener("keydown", (e) => {
     return;
   }
   if (e.target && e.target.tagName === "INPUT") return;
-  if (menuOpen || paused || guessOpen) return;
   const k = e.key.toLowerCase();
+  if (k === "t" && mp.active) {
+    if (!e.repeat) startTalk();
+    return;
+  }
+  if (menuOpen || paused || guessOpen) return;
   keys.add(k);
   if (k === "r" && (crashed || finished)) restartMode();
 });
-window.addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
+window.addEventListener("keyup", (e) => {
+  if (e.target && e.target.tagName === "INPUT") return;
+  const k = e.key.toLowerCase();
+  if (k === "t") stopTalk();
+  keys.delete(k);
+});
+window.addEventListener("blur", () => stopTalk());
 
 function restartMode() {
   if (mp.active) {

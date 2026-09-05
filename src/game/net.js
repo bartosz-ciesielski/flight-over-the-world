@@ -108,6 +108,14 @@ export function hostRoom(handlers, existingId) {
     sendExcept(peerId, data) {
       each((c) => c.send(data), peerId);
     },
+    call(peerId, stream) {
+      if (!peerId || !stream) return null;
+      try {
+        return peer.call(peerId, stream);
+      } catch {
+        return null;
+      }
+    },
     destroy() {
       for (const c of conns.values()) c.close();
       conns.clear();
@@ -121,6 +129,7 @@ export function hostRoom(handlers, existingId) {
   });
   peer.on("error", (err) => handlers.onError?.(err));
   peer.on("connection", attach);
+  peer.on("call", (call) => handlers.onCall?.(call));
 
   return api;
 }
@@ -184,6 +193,14 @@ export function joinRoom(hostId, handlers) {
     },
     sendTo() {},
     sendExcept() {},
+    call(peerId, stream) {
+      if (!peerId || !stream) return null;
+      try {
+        return peer.call(peerId, stream);
+      } catch {
+        return null;
+      }
+    },
     destroy() {
       destroyed = true;
       try {
@@ -204,6 +221,7 @@ export function joinRoom(hostId, handlers) {
     handlers.onError?.(err);
   });
   peer.on("open", () => tryConnect());
+  peer.on("call", (call) => handlers.onCall?.(call));
 
   return api;
 }
