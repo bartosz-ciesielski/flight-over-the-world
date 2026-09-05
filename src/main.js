@@ -343,8 +343,11 @@ function randomUsername() {
 }
 
 const NICK_KEY = "foe-nick";
+const JOIN_KEY = "foe-join";
 const GUESS_STATS_KEY = "foe-guess-stats";
 let pendingJoinId = "";
+let helloTimer = 0;
+let welcomed = false;
 
 function loadGuessStats() {
   try {
@@ -434,6 +437,52 @@ function storeNick(name) {
   }
 }
 
+function rememberJoin(id) {
+  pendingJoinId = id || "";
+  try {
+    if (id) sessionStorage.setItem(JOIN_KEY, id);
+    else sessionStorage.removeItem(JOIN_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+function savedJoin() {
+  try {
+    return String(sessionStorage.getItem(JOIN_KEY) || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+function stopHelloRetry() {
+  clearInterval(helloTimer);
+  helloTimer = 0;
+}
+
+function sendHello() {
+  if (!mp.active || mp.host || welcomed) return;
+  mp.net?.send({ t: "hello", name: mp.myName, plane: selectedPlane });
+}
+
+function startHelloRetry() {
+  stopHelloRetry();
+  welcomed = false;
+  sendHello();
+  let n = 0;
+  helloTimer = setInterval(() => {
+    if (welcomed || mp.host || !mp.active) {
+      stopHelloRetry();
+      return;
+    }
+    sendHello();
+    if (++n >= 15) {
+      stopHelloRetry();
+      setLobbyStatus("Host not found – they should stay in the room, then open the link again", true);
+    }
+  }, 800);
+}
+
 function normalizeNick(raw) {
   return String(raw || "").replace(/\s+/g, " ").trim().slice(0, 20);
 }
@@ -477,6 +526,7 @@ const mp = {
   goAt: 0,
   talkers: new Set(),
   visibility: "public",
+  joining: false,
   roomTitle: "",
   phase: "lobby",
   markLeft: 0,
@@ -831,7 +881,7 @@ function escapeHtml(s) {
 }
 
 function showNick(opts = {}) {
-  pendingJoinId = opts.roomId || parseRoomFromUrl() || pendingJoinId || "";
+  rememberJoin(opts.roomId || parseRoomFromUrl() || pendingJoinId || savedJoin() || "");
   menuOpen = true;
   el.landing.classList.add("hidden");
   el.menu.classList.add("hidden");
@@ -860,13 +910,13 @@ function submitNick() {
   }
   mp.myName = name;
   storeNick(name);
-  const joinId = pendingJoinId || parseRoomFromUrl();
-  pendingJoinId = "";
+  const joinId = pendingJoinId || parseRoomFromUrl() || savedJoin();
   if (joinId) {
     if (wasHosting(joinId)) openHostLobby(joinId);
     else openGuestLobby(joinId);
     return;
   }
+  rememberJoin("");
   showRooms();
 }
 
@@ -881,7 +931,7 @@ function showLanding() {
   el.lobby.classList.add("hidden");
   el.rooms?.classList.add("hidden");
   el.nick?.classList.add("hidden");
-  pendingJoinId = "";
+  rememberJoin("");
   carousel.setActive(false);
   lobbyCarousel.setActive(false);
   rememberHost("");
@@ -900,6 +950,7 @@ function showRooms() {
   el.rooms.classList.remove("hidden");
   carousel.setActive(false);
   lobbyCarousel.setActive(false);
+  rememberJoin("");
   rememberHost("");
   setRoomUrl("");
   ensureDirectory();
@@ -1084,7 +1135,13 @@ function renderLobby() {
   ];
   for (const p of otherPlayers()) rows.push(playerRow(p, false));
   if (mp.players.size === 0) {
-    rows.push(`<div class="player-row empty">${mp.visibility === "private" ? "Private room – share the link" : "Waiting for players…"}</div>`);
+    rows.push(`<div class="player-row empty">${
+      mp.joining
+        ? "Connecting to the host…"
+        : mp.visibility === "private"
+          ? "Private room – share the link"
+          : "Waiting for players…"
+    }</div>`);
   }
   el.lobbyPlayers.innerHTML = rows.join("");
   el.lobbyScopes.classList.toggle("locked", !mp.host);
@@ -1109,6 +1166,7 @@ function renderLobby() {
       : "Waiting for host";
 
   if (queued) setLobbyStatus("Round in progress – you will join the next one");
+  else if (mp.joining) setLobbyStatus("Joining room…");
   else if (!mp.host) setLobbyStatus(`Host picks the map. Fly 60s, mark in 10s, then the next round.`);
   else setLobbyStatus(`Pick a country or continent, then start. Anyone can join this ${mp.visibility} room.`);
 }
@@ -1262,7 +1320,13 @@ function handleNetData(data, fromId) {
     renderLobby();
     updateMpPresence();
     refreshVoice();
+  } else if (data.t === "who") {
+    sendHello();
   } else if (data.t === "welcome") {
+    welcomed = true;
+    mp.joining = false;
+    stopHelloRetry();
+    rememberJoin("");
     if (data.id) mp.myId = data.id;
     if (data.name) mp.myName = data.name;
     mp.roundActive = !!data.roundActive;
@@ -1278,6 +1342,12 @@ function handleNetData(data, fromId) {
     renderLobby();
     refreshVoice();
   } else if (data.t === "roster") {
+    if (!mp.host) {
+      welcomed = true;
+      mp.joining = false;
+      stopHelloRetry();
+      rememberJoin("");
+    }
     mp.roundActive = !!data.roundActive;
     applyRemoteRegion(data);
     if (data.visibility) mp.visibility = data.visibility;
@@ -1374,9 +1444,12 @@ function handleNetData(data, fromId) {
   }
 }
 
-function handlePeerJoined() {
-  if (mp.host) return;
-  mp.net?.send({ t: "hello", name: mp.myName, plane: selectedPlane });
+function handlePeerJoined(peerId) {
+  if (mp.host) {
+    if (peerId) mp.net?.sendTo(peerId, { t: "who" });
+    return;
+  }
+  sendHello();
 }
 
 function handlePeerLeft(peerId) {
@@ -1428,6 +1501,9 @@ function handleNetError(err) {
 }
 
 function closeRoom() {
+  stopHelloRetry();
+  welcomed = false;
+  mp.joining = false;
   stopPublishing();
   mp.net?.destroy();
   mp.net = null;
@@ -1502,8 +1578,11 @@ function openGuestLobby(id) {
   closeRoom();
   mp.active = true;
   mp.host = false;
+  mp.joining = true;
+  mp.visibility = "private";
   mp.myName = normalizeNick(mp.myName) || savedNick() || randomUsername();
   mp.roomId = id;
+  rememberJoin(id);
   showLobby();
   el.lobbyLink.value = roomLink(id);
   setLobbyStatus("Joining room…");
@@ -1514,6 +1593,7 @@ function openGuestLobby(id) {
     },
     onOpen(_hostId, myId) {
       if (myId) mp.myId = myId;
+      startHelloRetry();
       renderLobby();
     },
     onPeer: handlePeerJoined,
@@ -1523,6 +1603,7 @@ function openGuestLobby(id) {
     onError: handleNetError,
   });
   attachNet(api);
+  startHelloRetry();
 }
 
 function tryStartMp() {}
@@ -2552,7 +2633,7 @@ el.lobbyStart.addEventListener("click", () => {
   launchMpRound();
 });
 
-const joinId = parseRoomFromUrl();
+const joinId = parseRoomFromUrl() || savedJoin();
 if (joinId) showNick({ roomId: joinId });
 
 function syncPauseCopy() {

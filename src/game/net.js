@@ -49,10 +49,28 @@ export function rememberHost(id) {
 function openRoom(id, handlers, isHost) {
   const room = troJoin(TRO, id);
   const bus = room.makeAction("d");
+  const seen = new Set();
+
+  const onPeer = (peerId) => {
+    if (!peerId || seen.has(peerId)) return;
+    seen.add(peerId);
+    handlers.onPeer?.(peerId);
+  };
 
   bus.onMessage = (data, meta) => handlers.onData?.(data, meta?.peerId);
-  room.onPeerJoin = (peerId) => handlers.onPeer?.(peerId);
-  room.onPeerLeave = (peerId) => handlers.onLeft?.(peerId);
+  room.onPeerJoin = onPeer;
+  room.onPeerLeave = (peerId) => {
+    if (peerId) seen.delete(peerId);
+    handlers.onLeft?.(peerId);
+  };
+
+  const flushPeers = () => {
+    const peers = Object.keys(room.getPeers?.() || {});
+    for (const peerId of peers) onPeer(peerId);
+  };
+  const flushTimers = [];
+  queueMicrotask(flushPeers);
+  flushTimers.push(setTimeout(flushPeers, 200), setTimeout(flushPeers, 800), setTimeout(flushPeers, 2000));
 
   const api = {
     id,
@@ -91,6 +109,7 @@ function openRoom(id, handlers, isHost) {
       return null;
     },
     destroy() {
+      for (const t of flushTimers) clearTimeout(t);
       try {
         room.leave();
       } catch {

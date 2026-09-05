@@ -8,8 +8,9 @@ export function parseJoinCode(raw) {
   const text = String(raw || "").trim();
   if (!text) return "";
   try {
-    if (/^https?:/i.test(text) || text.includes("#")) {
+    if (/^https?:/i.test(text) || text.includes("#") || text.includes("?")) {
       const url = new URL(text, location.href);
+      if (url.searchParams.get("r")) return url.searchParams.get("r");
       const h = url.hash.replace(/^#/, "");
       const q = new URLSearchParams(h.includes("=") ? h : `r=${h}`);
       if (q.get("r")) return q.get("r");
