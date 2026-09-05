@@ -1,4 +1,4 @@
-import { distanceM, randomPointInEurope, loadEuropeGeo } from "./modes.js";
+import { distanceM, offsetPoint, pointInPoland, randomPointInEurope, loadEuropeGeo } from "./modes.js";
 
 export const EUROPE_ROOM_ID = "lnseurope";
 
@@ -50,12 +50,37 @@ export async function pickEuropeLandStart() {
   return randomPointInEurope(await loadEuropeGeo());
 }
 
+const BOT_GUESS_MIN_KM = 1100;
+const BOT_GUESS_FALLBACKS = [
+  { lat: 64.1, lon: -21.9 },
+  { lat: 37.0, lon: -8.0 },
+  { lat: 41.0, lon: 29.0 },
+  { lat: 69.6, lon: 18.9 },
+];
+
+function guessFarEnough(p, truth) {
+  if (!truth || !Number.isFinite(truth.lat)) return true;
+  return distanceM(p.lat, p.lon, truth.lat, truth.lon) / 1000 >= BOT_GUESS_MIN_KM;
+}
+
 export function pickBotGuess(truth, geo) {
-  if (!geo) return { lat: 48.8, lon: 2.3 };
-  const minKm = 250;
-  for (let i = 0; i < 80; i++) {
-    const p = randomPointInEurope(geo);
-    if (!truth || distanceM(p.lat, p.lon, truth.lat, truth.lon) / 1000 >= minKm) return p;
+  const pool = [];
+  if (geo) {
+    for (let i = 0; i < 240; i++) {
+      const p = randomPointInEurope(geo);
+      if (guessFarEnough(p, truth)) pool.push(p);
+      if (pool.length >= 12) break;
+    }
   }
-  return randomPointInEurope(geo);
+  if (pool.length) return pool[Math.floor(Math.random() * pool.length)];
+  if (truth && geo) {
+    for (let km = 2600; km >= BOT_GUESS_MIN_KM; km -= 200) {
+      for (let i = 0; i < 16; i++) {
+        const p = offsetPoint(truth.lat, truth.lon, km * (0.85 + Math.random() * 0.3));
+        if (pointInPoland(p.lon, p.lat, geo) && guessFarEnough(p, truth)) return p;
+      }
+    }
+  }
+  const ok = BOT_GUESS_FALLBACKS.filter((p) => guessFarEnough(p, truth));
+  return ok[Math.floor(Math.random() * ok.length)] || BOT_GUESS_FALLBACKS[0];
 }

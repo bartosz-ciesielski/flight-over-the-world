@@ -392,3 +392,30 @@ export function applyTileQuality(tiles, mobile = false) {
   tiles.lruCache.minBytesSize = mobile ? 2e8 : 8e8;
   tiles.lruCache.unloadPercent = mobile ? 0.2 : 0.08;
 }
+
+/** Drop cached tiles so a long teleport can download the new place. */
+export function flushTilesForWarp(tiles) {
+  if (!tiles?.lruCache) return;
+  const lru = tiles.lruCache;
+  const oldMin = lru.minSize;
+  const oldMinB = lru.minBytesSize;
+  const oldPct = lru.unloadPercent;
+  try {
+    lru.minSize = 0;
+    lru.minBytesSize = 0;
+    // One unload pass only evicts unloadPercent (8%) — drain in a loop.
+    lru.unloadPercent = 1;
+    for (let i = 0; i < 16 && (lru.itemList?.length || 0) > 0; i++) {
+      lru.markAllUnused?.();
+      const items = lru.itemList ? [...lru.itemList] : [];
+      for (const item of items) lru.markUnused?.(item);
+      lru.unloadUnusedContent?.();
+    }
+    tiles.resetFailedTiles?.();
+  } catch {
+    /* ignore */
+  }
+  lru.unloadPercent = oldPct;
+  lru.minSize = oldMin;
+  lru.minBytesSize = oldMinB;
+}

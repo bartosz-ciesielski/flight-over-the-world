@@ -57,6 +57,7 @@ import {
   loadTileSlots,
   syncTileAuth,
   applyTileQuality,
+  flushTilesForWarp,
 } from "./game/tileAuth.js";
 import { createHoldParentTilesPlugin } from "./game/holdParentTiles.js";
 import { createFreeMap, createMiniMap, paintTrailMap } from "./game/freeMap.js";
@@ -557,6 +558,7 @@ const mp = {
   rematch: new Set(),
   launching: false,
   goAt: 0,
+  lastGo: null,
   talkers: new Set(),
   visibility: "public",
   joining: false,
@@ -1230,6 +1232,22 @@ function humansWantPlay() {
   return otherPlayers().some((p) => p.joined && !isBotId(p.id));
 }
 
+function isLocallyFlying() {
+  return !!(mp.inRound && mp.roundActive && (!menuOpen || awaitingSnap));
+}
+
+function humansInRound() {
+  if (mp.inRound) return true;
+  return otherPlayers().some((p) => p.inRound && !isBotId(p.id));
+}
+
+function isRoundLive() {
+  if (!mp.roundActive || mp.launching || !mp.truth) return false;
+  if (mp.phase === "mark" || mp.phase === "results") return humansInRound() || mp.goSent;
+  if (mp.phase === "fly") return humansInRound();
+  return false;
+}
+
 function lobbyPhaseText() {
   const phase = mp.roundActive ? mp.phase : "lobby";
   const left = Math.max(0, Math.ceil(
@@ -1536,12 +1554,12 @@ function resumeHostDuties() {
     setLobbyScope("eu");
     seedEuropeBots();
   }
-  const humanFlying = mp.inRound || otherPlayers().some((p) => p.inRound && !isBotId(p.id));
-  if (mp.roundActive && !humanFlying && !mp.wantPlay && !mp.launching) {
-    finishRoomRound();
+  if (!isRoundLive()) {
+    if (mp.roundActive) finishRoomRound();
     mp.phase = "lobby";
     seedEuropeBots();
-    broadcastRoster();
+    if (humansWantPlay() && !mp.launching) launchMpRound();
+    else broadcastRoster();
     renderLobby();
     updateMpPresence();
     return;
@@ -1549,14 +1567,12 @@ function resumeHostDuties() {
   if (mp.phase === "results") {
     if (mp.resultsLeft <= 0 && !mp.launching && humansWantPlay()) launchMpRound();
     else tryLaunchRematch();
-  } else if (!mp.roundActive && !mp.launching && humansWantPlay()) {
-    launchMpRound();
   } else {
     if (mp.roundActive && !mp.goSent) tryReleaseGo();
     checkRoundClear();
     tryLaunchRematch();
   }
-  if (europeRoomActive() && mp.roundActive && mp.inRound) {
+  if (europeRoomActive() && mp.roundActive && isLocallyFlying()) {
     snapEuropeBots();
     if (mp.goSent) initBotRuntime(plane?.height);
   }
@@ -1634,12 +1650,12 @@ function renderLobby() {
   if (el.lobbyVis) el.lobbyVis.textContent = playerCountLabel();
   if (el.lobbyPhase) el.lobbyPhase.textContent = lobbyPhaseText();
 
-  const inMatch = mp.inRound && mp.roundActive;
-  const queued = mp.wantPlay && mp.roundActive && !mp.inRound;
-  el.lobbyStart.disabled = inMatch || queued || mp.launching || mp.joining;
+  const flyingHere = isLocallyFlying();
+  const queued = mp.wantPlay && mp.roundActive && !mp.inRound && isRoundLive();
+  el.lobbyStart.disabled = flyingHere || queued || mp.launching || mp.joining;
   el.lobbyStart.textContent = mp.joining
     ? "Joining room…"
-    : inMatch
+    : flyingHere
       ? "In match"
       : queued
         ? "Queued — next round"
@@ -1659,10 +1675,10 @@ function playerRow(p, isSelf) {
   const pts = ` · ${p.score || 0} pts`;
   let badge = "IN LOBBY";
   let cls = "";
-  if (p.inRound) {
+  if (p.inRound && (isSelf ? isLocallyFlying() : mp.roundActive)) {
     badge = "IN FLIGHT";
     cls = " ingame";
-  } else if (p.waiting || (p.joined && mp.roundActive && !p.inRound)) {
+  } else if (p.waiting || (p.joined && isRoundLive() && !p.inRound)) {
     badge = "QUEUED";
     cls = " waiting";
   } else if (p.ready || p.joined) {
@@ -1826,9 +1842,10 @@ function handleNetData(data, fromId) {
     if (data.name) mp.myName = data.name;
     applyHost(data.hostId || fromId);
     mp.roundActive = !!data.roundActive;
-    mp.wantPlay = false;
-    mp.waiting = false;
-    mp.inRound = false;
+    if (!mp.wantPlay) {
+      mp.waiting = false;
+      mp.inRound = false;
+    }
     applyPhaseInfo(data);
     applyRemoteRegion(data);
     if (data.visibility) mp.visibility = data.visibility;
@@ -1909,13 +1926,9 @@ function handleNetData(data, fromId) {
     if (id && mp.players.has(id)) {
       const p = mp.players.get(id);
       p.joined = true;
-      p.waiting = mp.roundActive;
       p.plane = data.plane || p.plane;
     }
-    if (mp.host) {
-      if (!mp.roundActive && !mp.launching && humansWantPlay()) launchMpRound();
-      else broadcastRoster();
-    }
+    if (mp.host) admitPlayer(id);
     renderLobby();
   } else if (data.t === "phase") {
     applyPhaseInfo(data);
@@ -2040,6 +2053,11 @@ function closeRoom() {
   mp.inRound = false;
   mp.roundActive = false;
   mp.phase = "lobby";
+  mp.goSent = false;
+  mp.waitingGo = false;
+  mp.lastGo = null;
+  mp.truth = null;
+  mp.snapped = new Set();
   mp.players.clear();
   mp.guesses.clear();
   mp.poses.clear();
@@ -2181,7 +2199,7 @@ async function launchMpRound() {
       ...regionPayload(),
     };
     mp.net?.send(msg);
-    if (seats[mp.myId]) startMpFlight(msg);
+    if (seats[mp.myId] != null) startMpFlight(msg);
     else {
       armRoundState(msg);
       mp.launching = false;
@@ -2307,6 +2325,7 @@ function armRoundState(msg) {
   mp.rematch.clear();
   mp.goSent = false;
   mp.waitingGo = false;
+  mp.lastGo = null;
   mp.launching = false;
   mp.goAt = 0;
   markRoundStarted(mp.seats);
@@ -2327,7 +2346,7 @@ function armRoundState(msg) {
     };
     setTimeout(releaseIfSnapped, 12000);
     setTimeout(releaseIfSnapped, 22000);
-    if (!mp.seats[mp.myId]) {
+    if (mp.seats[mp.myId] == null) {
       setTimeout(() => {
         if (!mp.host || mp.goSent || !mp.roundActive) return;
         if ([...mp.snapInfo.values()].some(isTerrainSnap)) applyGo();
@@ -2361,7 +2380,12 @@ async function startMpFlight(msg) {
 }
 
 function reportSnapped() {
-  if (!mp.active || !mp.inRound || mp.goSent || mp.waitingGo) return;
+  if (!mp.active || !mp.inRound) return;
+  if (mp.goSent && mp.lastGo) {
+    applyGo({ ...mp.lastGo });
+    return;
+  }
+  if (mp.goSent || mp.waitingGo) return;
   mp.waitingGo = true;
   setLobbyStatus("Waiting until everyone is ready…");
   showMpWait("Waiting until everyone is ready…");
@@ -2413,14 +2437,19 @@ function buildGoPayload() {
 }
 
 function applyGo(msg) {
-  if (mp.goSent) return;
-  const payload = msg && Number.isFinite(msg.h)
+  const incoming = msg && Number.isFinite(msg.h)
     ? { h: msg.h, gh: msg.gh, heading: msg.heading ?? 0 }
-    : buildGoPayload();
+    : null;
+  if (mp.goSent && !(mp.inRound && (incoming || mp.lastGo) && (menuOpen || awaitingSnap))) {
+    return;
+  }
+  const payload = incoming || mp.lastGo || buildGoPayload();
   if (!payload) return;
+  const alreadySent = mp.goSent;
   mp.goSent = true;
   mp.waitingGo = false;
-  if (mp.host) mp.net?.send({ t: "go", ...payload });
+  mp.lastGo = payload;
+  if (mp.host && !alreadySent) mp.net?.send({ t: "go", ...payload });
   pendingSnap = false;
   awaitingSnap = false;
   armCrashGrace();
@@ -2493,9 +2522,11 @@ function leaveRound() {
 
 function checkRoundClear() {
   if (!mp.host) return;
-  if (mp.inRound || otherPlayers().some((p) => p.inRound)) return;
+  if (humansInRound()) return;
   finishRoomRound();
+  mp.phase = "lobby";
   mp.net?.send({ t: "roundEnd" });
+  seedEuropeBots();
   broadcastRoster();
 }
 
@@ -2504,6 +2535,12 @@ function finishRoomRound() {
   mp.inRound = false;
   mp.waiting = false;
   mp.myReady = false;
+  mp.goSent = false;
+  mp.waitingGo = false;
+  mp.lastGo = null;
+  mp.truth = null;
+  mp.seats = {};
+  mp.snapped = new Set();
   for (const p of mp.players.values()) {
     p.waiting = false;
     p.inRound = false;
@@ -2515,6 +2552,8 @@ function finishRoomRound() {
   mp.rematch.clear();
   mp.launching = false;
   hideAllMates();
+  botRuntime.clear();
+  clearBotGuesses();
 }
 
 function showMpWait(text) {
@@ -3209,13 +3248,10 @@ function beginFlight(lat, lon) {
   markStarting();
   sleepPreviews();
   el.menuError.textContent = "Loading terrain…";
-  try {
-    tiles?.lruCache?.unloadUnusedContent?.();
-  } catch {
-    /* ignore */
-  }
   if (selectedPlane !== planeMesh?.userData?.key) loadPlane(selectedPlane);
   resetFlight(lat, lon);
+  flushTilesForWarp(tiles);
+  retryFailedTiles(true);
   el.timerBox.classList.toggle("show", mode !== "free");
   el.distBox.classList.remove("show");
   lastPlaceAt = 0;
@@ -3339,16 +3375,94 @@ el.lobbyCopy.addEventListener("click", async () => {
     el.lobbyLink.select();
   }
 });
+function admitPlayer(id) {
+  if (!mp.host) return;
+  const p = id && mp.players.get(id);
+  if (p) p.joined = true;
+  if (mp.launching) {
+    broadcastRoster();
+    return;
+  }
+  if (isRoundLive() && mp.truth) {
+    if (p) {
+      p.waiting = false;
+      p.inRound = true;
+    }
+    if (id && mp.seats[id] == null) mp.seats[id] = Object.keys(mp.seats).length;
+    if (id) {
+      mp.net.sendTo(id, {
+        t: "start",
+        mode: "guess",
+        lat: mp.truth.lat,
+        lon: mp.truth.lon,
+        scope: guessScope,
+        seats: mp.seats,
+        hostId: mp.myId,
+        ...phasePayload(),
+        ...regionPayload(),
+      });
+      if (mp.lastGo) mp.net.sendTo(id, { t: "go", ...mp.lastGo });
+    }
+    broadcastRoster();
+    return;
+  }
+  if (isRoundLive()) {
+    if (p) p.waiting = true;
+    broadcastRoster();
+    return;
+  }
+  if (p) p.waiting = false;
+  finishRoomRound();
+  mp.phase = "lobby";
+  if (!mp.launching) launchMpRound();
+}
+
+function joinCurrentFlight() {
+  if (!mp.truth) {
+    launchMpRound();
+    return;
+  }
+  mp.wantPlay = true;
+  mp.inRound = true;
+  mp.roundActive = true;
+  mp.waiting = false;
+  if (mp.seats[mp.myId] == null) mp.seats[mp.myId] = Object.keys(mp.seats).length;
+  const total = Object.keys(mp.seats).length || 1;
+  const spawn = offsetByIndex(mp.truth.lat, mp.truth.lon, mp.seats[mp.myId], total);
+  menuOpen = true;
+  guessOpen = false;
+  el.lobby.classList.add("hidden");
+  showMpWait("Loading terrain…");
+  if (selectedPlane !== planeMesh?.userData?.key) loadPlane(selectedPlane);
+  beginFlight(spawn.lat, spawn.lon);
+  seedAllMates(plane.height);
+  if (mp.host && europeRoomActive()) snapEuropeBots();
+  broadcastRoster();
+}
+
 function requestPlay() {
-  if (!mp.active || mp.joining || mp.launching) return;
-  if (mp.inRound && mp.roundActive) return;
+  if (!mp.active || mp.launching) return;
+  if (isLocallyFlying()) return;
   mp.wantPlay = true;
   mp.myReady = true;
-  mp.waiting = mp.roundActive;
-  mp.net?.send({ t: "join", from: mp.myId, plane: selectedPlane });
+  if (mp.joining) {
+    renderLobby();
+    return;
+  }
   if (mp.host) {
-    if (!mp.roundActive && !mp.launching) launchMpRound();
-    else broadcastRoster();
+    if (isRoundLive() && mp.truth && !isLocallyFlying()) joinCurrentFlight();
+    else if (isRoundLive()) {
+      mp.waiting = true;
+      broadcastRoster();
+    } else {
+      mp.waiting = false;
+      finishRoomRound();
+      mp.phase = "lobby";
+      launchMpRound();
+    }
+  } else {
+    mp.waiting = false;
+    mp.net?.send({ t: "join", from: mp.myId, plane: selectedPlane });
   }
   renderLobby();
 }
@@ -3364,7 +3478,11 @@ if (joinId) showNick({ roomId: joinId });
 function syncPauseCopy() {
   if (mp.active) {
     if (el.pauseTitle) el.pauseTitle.textContent = "Leave match?";
-    if (el.pauseSub) el.pauseSub.textContent = "The round keeps going for everyone else.";
+    if (el.pauseSub) {
+      el.pauseSub.textContent = humansInRound() && otherPlayers().some((p) => p.inRound && !isBotId(p.id))
+        ? "The round keeps going for everyone else."
+        : "You can join again from the lobby.";
+    }
     el.resume.textContent = "Continue";
     el.restart.textContent = "Leave";
   } else {
