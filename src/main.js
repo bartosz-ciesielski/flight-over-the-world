@@ -227,7 +227,7 @@ function onTileThrottle(status = 429) {
       applyTileQuality(tiles);
       if (switched) {
         tileHoldUntil = 0;
-        tiles.resetFailedTiles();
+        pendingFailedRetry = true;
         return;
       }
       // jeden klucz albo wszystkie w cooldown — krótka pauza, jakość bez zmian
@@ -259,7 +259,31 @@ function retryFailedTiles(force = false) {
   if (!force && now - lastFailedRetryAt < 12000) return;
   lastFailedRetryAt = now;
   pendingFailedRetry = false;
-  tiles.resetFailedTiles();
+  resetFailedTilesSafe();
+}
+
+function resetFailedTilesSafe() {
+  if (!tiles) return;
+  try {
+    if (tiles.rootLoadingState === -1) tiles.rootLoadingState = 0;
+    if (!(tiles.stats?.failed)) return;
+    tiles.traverse?.((tile) => {
+      if (tile?.internal?.loadingState === -1) tile.internal.loadingState = 0;
+    }, null, false);
+    tiles.stats.failed = 0;
+  } catch (err) {
+    lastTileErr = String(err?.message || err).slice(0, 220);
+  }
+}
+
+function updateTilesSafe() {
+  if (!tiles) return;
+  try {
+    tiles.update();
+  } catch (err) {
+    lastTileErr = String(err?.message || err).slice(0, 220);
+    pendingFailedRetry = true;
+  }
 }
 let planeMesh, plane, beacon;
 let groundAlt = TERRAIN_ALT;
@@ -2071,7 +2095,7 @@ function init() {
   tilePool.onSwitch = () => {
     syncTileAuth(tiles, tilePool);
     applyTileQuality(tiles);
-    tiles.resetFailedTiles();
+    pendingFailedRetry = true;
   };
   tiles.registerPlugin(new TileCompressionPlugin());
   tiles.registerPlugin(new UpdateOnChangePlugin());
@@ -3384,7 +3408,7 @@ function tickFrame() {
       camera.updateMatrixWorld();
       releaseTileHold();
       retryFailedTiles();
-      tiles.update();
+      updateTilesSafe();
     }
   } else {
     tiles.group.visible = true;
@@ -3394,7 +3418,7 @@ function tickFrame() {
     camera.updateMatrixWorld();
     releaseTileHold();
     retryFailedTiles();
-    tiles.update();
+    updateTilesSafe();
   }
 
   renderer.render(scene, camera);
