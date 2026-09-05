@@ -26,6 +26,8 @@ import {
   TextureLoader,
   EquirectangularReflectionMapping,
   SRGBColorSpace,
+  LinearFilter,
+  LinearMipmapLinearFilter,
   Box3,
   Group,
   Mesh,
@@ -2111,7 +2113,10 @@ async function init() {
     applyTileQuality(tiles);
     pendingFailedRetry = true;
   };
-  tiles.registerPlugin(new TileCompressionPlugin());
+  tiles.registerPlugin(new TileCompressionPlugin({
+    disableMipmaps: false,
+    compressIndex: true,
+  }));
   tiles.registerPlugin(new UpdateOnChangePlugin());
   const holdParents = createHoldParentTilesPlugin();
   tiles.registerPlugin(holdParents);
@@ -2128,6 +2133,10 @@ async function init() {
   tiles.setResolutionFromRenderer(camera, renderer);
   tiles.setCamera(camera);
   applyTileQuality(tiles);
+  const maxAniso = Math.min(16, renderer.capabilities.getMaxAnisotropy());
+  tiles.addEventListener("load-model", ({ scene }) => {
+    sharpenTileTextures(scene, isMobile ? Math.min(8, maxAniso) : maxAniso);
+  });
   tiles.addEventListener("load-tileset", () => {
     applyTileQuality(tiles);
     tilePool.rememberPluginSession(
@@ -2337,6 +2346,27 @@ function resetFlight(latDeg, lonDeg) {
 function applyPixelRatio() {
   if (!renderer) return;
   renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+}
+
+function sharpenTileTextures(root, anisotropy) {
+  if (!root) return;
+  root.traverse((obj) => {
+    if (!obj.isMesh) return;
+    const list = Array.isArray(obj.material) ? obj.material : [obj.material];
+    for (const mat of list) {
+      if (!mat) continue;
+      for (const key in mat) {
+        const tex = mat[key];
+        if (!tex || !tex.isTexture || tex.userData.foeSharp) continue;
+        tex.userData.foeSharp = true;
+        tex.anisotropy = anisotropy;
+        tex.generateMipmaps = true;
+        tex.minFilter = LinearMipmapLinearFilter;
+        tex.magFilter = LinearFilter;
+        tex.needsUpdate = true;
+      }
+    }
+  });
 }
 
 function onResize() {
@@ -3496,6 +3526,10 @@ function tickFrame() {
     tileHoldMs: tileHoldUntil ? Math.max(0, Math.round(tileHoldUntil - performance.now())) : 0,
     tileJobs: tiles.downloadQueue?.maxJobsPerOrigin ?? -1,
     tileErr: lastTileErr,
+    memJs: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : -1,
+    memTex: renderer.info?.memory?.textures ?? -1,
+    memGeo: renderer.info?.memory?.geometries ?? -1,
+    memCache: tiles.lruCache ? Math.round((tiles.lruCache.cachedBytes || 0) / 1048576) : -1,
     tileHeld: tiles.userData?.holdParents?.held?.size ?? 0,
     tilePool: tilePool.debug(),
     explosions: explosions.length,
