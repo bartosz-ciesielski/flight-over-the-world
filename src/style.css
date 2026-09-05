@@ -1339,6 +1339,15 @@ kbd {
   font-weight: 600;
 }
 
+.pause-sub {
+  margin: -6px 0 8px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.pause-sub:empty { display: none; }
+
 .pause-card button {
   padding: 13px 20px;
   border-radius: 6px;

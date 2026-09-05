@@ -241,6 +241,7 @@ let frameCount = 0;
 let selectedPlane = "pa28";
 let menuOpen = true;
 let paused = false;
+let leaveOpen = false;
 let pendingSnap = false; // po teleporcie: jednorazowe dosadzenie na właściwą wysokość
 let startLat = 52.38871, startLon = 16.60069; // Niepruszewo
 let camOffset = PLANES.pa28.cam;
@@ -343,6 +344,8 @@ const el = {
   menuError: document.getElementById("menu-error"),
   modeDesc: document.getElementById("mode-desc"),
   pause: document.getElementById("pause"),
+  pauseTitle: document.getElementById("pause-title"),
+  pauseSub: document.getElementById("pause-sub"),
   resume: document.getElementById("btn-resume"),
   restart: document.getElementById("btn-restart"),
   carCanvas: document.getElementById("carousel-canvas"),
@@ -1639,6 +1642,7 @@ function abortRematchToLobby() {
 }
 
 function backToLobby() {
+  setLeaveOpen(false);
   hideBanner();
   menuOpen = true;
   timerActive = false;
@@ -2235,18 +2239,52 @@ if (joinId) {
   else openGuestLobby(joinId);
 }
 
-// --- pauza (ESC) ---
-function setPaused(v) {
-  paused = v;
+function syncPauseCopy() {
+  if (mp.active) {
+    if (el.pauseTitle) el.pauseTitle.textContent = "Leave match?";
+    if (el.pauseSub) el.pauseSub.textContent = "The round keeps going for everyone else.";
+    el.resume.textContent = "Continue";
+    el.restart.textContent = "Leave";
+  } else {
+    if (el.pauseTitle) el.pauseTitle.textContent = "Paused";
+    if (el.pauseSub) el.pauseSub.textContent = "";
+    el.resume.textContent = "Continue";
+    el.restart.textContent = "Start over";
+  }
+}
+
+function setLeaveOpen(v) {
+  leaveOpen = v;
+  paused = false;
   keys.clear();
+  syncPauseCopy();
   el.pause.classList.toggle("show", v);
 }
 
-el.resume.addEventListener("click", () => setPaused(false));
+function setPaused(v) {
+  if (mp.active) {
+    setLeaveOpen(v);
+    return;
+  }
+  leaveOpen = false;
+  paused = v;
+  keys.clear();
+  syncPauseCopy();
+  el.pause.classList.toggle("show", v);
+}
+
+el.resume.addEventListener("click", () => {
+  if (mp.active) setLeaveOpen(false);
+  else setPaused(false);
+});
 el.restart.addEventListener("click", () => {
+  if (mp.active) {
+    setLeaveOpen(false);
+    backToLobby();
+    return;
+  }
   setPaused(false);
-  if (mp.active) backToLobby();
-  else backToMenu();
+  backToMenu();
 });
 
 function backToMenu() {
@@ -2472,7 +2510,12 @@ window.addEventListener("keydown", (e) => {
     return;
   }
   if (e.key === "Escape") {
-    if (!menuOpen && !guessOpen) setPaused(!paused);
+    if (menuOpen) return;
+    if (mp.active) {
+      setLeaveOpen(!leaveOpen);
+      return;
+    }
+    if (!guessOpen) setPaused(!paused);
     return;
   }
   if (e.target && e.target.tagName === "INPUT") return;
