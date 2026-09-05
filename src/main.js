@@ -93,6 +93,7 @@ import {
   wasHosting,
   rememberHost,
 } from "./game/net.js";
+import { connectDirectory, parseJoinCode, startAnnouncer } from "./game/directory.js";
 import {
   bindVoice,
   ensureMic,
@@ -192,6 +193,8 @@ const PLANE_ORDER = ["pa28", "q400", "citation", "jet", "rocket"];
 
 const HOME_TIME = 600; // 10 min na dolot do domu
 const GUESS_TIME = 60; // 1 min na rozpoznanie terenu
+const MARK_TIME = 10;
+const RESULTS_TIME = 10;
 const HOME_CAPTURE_M = 600;
 const HOME_BEACON_M = 1000;
 
@@ -314,6 +317,11 @@ const mp = {
   launching: false,
   goAt: 0,
   talkers: new Set(),
+  visibility: "public",
+  roomTitle: "",
+  phase: "lobby",
+  markLeft: 0,
+  resultsLeft: 0,
 };
 
 const ctrl = { roll: 0, pitch: 0, throttle: 0 };
@@ -358,7 +366,20 @@ const el = {
   mpWaitText: document.getElementById("mp-wait-text"),
   guessScope: document.getElementById("guess-scope"),
   landing: document.getElementById("landing"),
+  rooms: document.getElementById("rooms"),
+  roomsList: document.getElementById("rooms-list"),
+  roomsStatus: document.getElementById("rooms-status"),
+  roomsBack: document.getElementById("rooms-back"),
+  roomTitle: document.getElementById("room-title"),
+  roomCode: document.getElementById("room-code"),
+  btnCreatePublic: document.getElementById("btn-create-public"),
+  btnCreatePrivate: document.getElementById("btn-create-private"),
+  btnJoinCode: document.getElementById("btn-join-code"),
   lobby: document.getElementById("lobby"),
+  lobbyTitle: document.getElementById("lobby-title"),
+  lobbyVis: document.getElementById("lobby-vis"),
+  gmTitle: document.getElementById("gm-title"),
+  gmTimer: document.getElementById("gm-timer"),
   btnSolo: document.getElementById("btn-solo"),
   btnMulti: document.getElementById("btn-multi"),
   menuBack: document.getElementById("menu-back"),
@@ -527,24 +548,132 @@ function showCrashHints() {
 el.fatalOk?.addEventListener("click", () => hideFatal());
 showCrashHints();
 
+let directory = null;
+let publicRooms = [];
+let announcer = null;
+
+function setRoomsStatus(msg, isErr = false) {
+  if (!el.roomsStatus) return;
+  el.roomsStatus.textContent = msg || "";
+  el.roomsStatus.classList.toggle("err", isErr);
+}
+
+function scopeLabel(scope = guessScope) {
+  const pack = getRegionPack();
+  if (scope === "pl") return pack.country.name;
+  if (scope === "eu") return pack.continent.name;
+  return "World";
+}
+
+function publicRoomInfo() {
+  return {
+    id: mp.roomId,
+    title: mp.roomTitle || (mp.visibility === "private" ? "Private room" : "Public room"),
+    count: 1 + mp.players.size,
+    scope: guessScope,
+    scopeLabel: scopeLabel(guessScope),
+    playing: mp.roundActive,
+    visibility: mp.visibility,
+  };
+}
+
+function publishRoom() {
+  if (!mp.host || !mp.roomId || mp.visibility !== "public") return;
+  if (!announcer && mp.net?.connect) {
+    announcer = startAnnouncer((id) => mp.net.connect(id), publicRoomInfo);
+  }
+}
+
+function stopPublishing() {
+  announcer?.stop();
+  announcer = null;
+}
+
+function ensureDirectory() {
+  if (directory) return directory;
+  setRoomsStatus("Looking for public rooms…");
+  directory = connectDirectory((rooms) => {
+    publicRooms = rooms.filter((r) => r.id && r.visibility !== "private");
+    renderRoomList();
+  });
+  return directory;
+}
+
+function closeDirectory() {
+  stopPublishing();
+  directory?.destroy();
+  directory = null;
+  publicRooms = [];
+}
+
+function renderRoomList() {
+  if (!el.roomsList) return;
+  const live = publicRooms.filter((r) => r.id !== mp.roomId);
+  if (!live.length) {
+    el.roomsList.innerHTML = `<div class="room-row empty">No public rooms yet — create one</div>`;
+    return;
+  }
+  el.roomsList.innerHTML = live.map((r) => {
+    const playing = r.playing ? " · in flight" : "";
+    return `<div class="room-row">
+      <div class="r-meta">
+        <span class="r-name">${escapeHtml(r.title || "Public room")}</span>
+        <span class="r-sub">${r.count || 1} player${r.count === 1 ? "" : "s"} · ${escapeHtml(r.scopeLabel || "Guess")}${playing}</span>
+      </div>
+      <button type="button" data-join="${r.id}">Join</button>
+    </div>`;
+  }).join("");
+  el.roomsList.querySelectorAll("[data-join]").forEach((btn) => {
+    btn.addEventListener("click", () => openGuestLobby(btn.dataset.join));
+  });
+}
+
+function escapeHtml(s) {
+  return String(s || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 function showLanding() {
   closeRoom();
+  closeDirectory();
   mp.active = false;
   menuOpen = true;
   el.landing.classList.remove("hidden");
   el.menu.classList.add("hidden");
   el.lobby.classList.add("hidden");
+  el.rooms?.classList.add("hidden");
   carousel.setActive(false);
   lobbyCarousel.setActive(false);
   rememberHost("");
   history.replaceState(null, "", location.pathname + location.search);
 }
 
+function showRooms() {
+  closeRoom();
+  mp.active = false;
+  menuOpen = true;
+  el.landing.classList.add("hidden");
+  el.menu.classList.add("hidden");
+  el.lobby.classList.add("hidden");
+  el.rooms.classList.remove("hidden");
+  carousel.setActive(false);
+  lobbyCarousel.setActive(false);
+  rememberHost("");
+  history.replaceState(null, "", location.pathname + location.search);
+  ensureDirectory();
+  renderRoomList();
+}
+
 function showSoloMenu() {
+  closeDirectory();
   mp.active = false;
   menuOpen = true;
   el.landing.classList.add("hidden");
   el.lobby.classList.add("hidden");
+  el.rooms?.classList.add("hidden");
   el.menu.classList.remove("hidden");
   carousel.setActive(true);
   lobbyCarousel.setActive(false);
@@ -554,6 +683,7 @@ function showLobby() {
   menuOpen = true;
   el.landing.classList.add("hidden");
   el.menu.classList.add("hidden");
+  el.rooms?.classList.add("hidden");
   el.lobby.classList.remove("hidden");
   carousel.setActive(false);
   ensureLobbyCarousel();
@@ -647,11 +777,14 @@ function broadcastRoster() {
     t: "roster",
     players: rosterPayload(),
     roundActive: mp.roundActive,
-    mode,
+    mode: "guess",
     scope: guessScope,
+    visibility: mp.visibility,
+    title: mp.roomTitle,
     city: el.lobbyCity.value,
     ...regionPayload(),
   });
+  publishRoom();
 }
 
 function renderLobby() {
@@ -667,30 +800,34 @@ function renderLobby() {
   ];
   for (const p of otherPlayers()) rows.push(playerRow(p, false));
   if (mp.players.size === 0) {
-    rows.push(`<div class="player-row empty">Waiting for players… send the link</div>`);
+    rows.push(`<div class="player-row empty">${mp.visibility === "private" ? "Private room – share the code" : "Waiting for players…"}</div>`);
   }
   el.lobbyPlayers.innerHTML = rows.join("");
   el.lobbyScopes.classList.toggle("locked", !mp.host);
-  document.querySelector(".lobby-modes")?.classList.toggle("locked", !mp.host);
-  el.lobbyCity.classList.toggle("locked", !mp.host);
-  el.lobbyCity.readOnly = !mp.host;
+  if (el.lobbyCity) {
+    el.lobbyCity.style.display = "none";
+    el.lobbyCity.classList.add("locked");
+    el.lobbyCity.readOnly = true;
+  }
   if (mp.roomId) el.lobbyLink.value = roomLink(mp.roomId);
+  if (el.lobbyTitle) el.lobbyTitle.textContent = mp.roomTitle || (mp.visibility === "private" ? "Private room" : "Public room");
+  if (el.lobbyVis) {
+    const vis = mp.visibility === "private" ? "Private" : "Public";
+    const code = mp.visibility === "private" && mp.roomId ? ` · code ${mp.roomId}` : "";
+    el.lobbyVis.textContent = `${vis} · Guess the region · ${scopeLabel()}${code}`;
+  }
 
   const queued = mp.waiting || (mp.roundActive && !mp.inRound);
-  el.lobbyStart.disabled = queued;
+  el.lobbyStart.disabled = queued || !mp.host || mp.roundActive || mp.launching;
   el.lobbyStart.textContent = queued
     ? "Wait for next round"
-    : mp.myReady
-      ? "Cancel ready"
-      : "Start";
+    : mp.host
+      ? "Start match"
+      : "Waiting for host";
 
-  const playable = playablePlayers().length;
-  const readyN = (mp.myReady && !mp.waiting ? 1 : 0) + otherPlayers().filter((p) => !p.waiting && p.ready).length;
   if (queued) setLobbyStatus("Round in progress – you will join the next one");
-  else if (playable < 2) setLobbyStatus("Send the link to friends – everyone in the room must press Start");
-  else if (mp.myReady && readyN === playable) setLobbyStatus("Starting…");
-  else if (mp.myReady) setLobbyStatus(`Waiting for everyone to press Start (${readyN}/${playable})`);
-  else setLobbyStatus(`Everyone press Start (${playable} players)`);
+  else if (!mp.host) setLobbyStatus(`Host picks the map. Fly 60s, mark in 10s, then the next round.`);
+  else setLobbyStatus(`Pick a country or continent, then start. Anyone can join this ${mp.visibility} room.`);
 }
 
 function playerRow(p, isSelf) {
@@ -712,13 +849,12 @@ function playerRow(p, isSelf) {
 }
 
 function applyLobbySetup() {
-  document.querySelectorAll("#lobby .mode-card").forEach((b) =>
-    b.classList.toggle("selected", b.dataset.mode === mode)
-  );
-  el.lobbyModeDesc.textContent = MODE_DESCS[mode] || "";
-  el.lobbyScopes.style.display = mode === "guess" ? "flex" : "none";
-  el.lobbyCity.style.display = mode === "guess" ? "none" : "block";
-  el.lobbyCity.placeholder = MODE_PLACEHOLDERS[mode] || "";
+  mode = "guess";
+  if (el.lobbyModeDesc) {
+    el.lobbyModeDesc.textContent = "One minute in the air, 10 seconds to mark the map, then scores and the next round.";
+  }
+  el.lobbyScopes.style.display = "flex";
+  if (el.lobbyCity) el.lobbyCity.style.display = "none";
 }
 
 function selectLobbyMode(m, broadcast = false) {
@@ -834,8 +970,10 @@ function handleNetData(data, fromId) {
       name,
       roster: rosterPayload(),
       roundActive: mp.roundActive,
-      mode,
+      mode: "guess",
       scope: guessScope,
+      visibility: mp.visibility,
+      title: mp.roomTitle,
       city: el.lobbyCity.value,
       ...regionPayload(),
     });
@@ -848,8 +986,10 @@ function handleNetData(data, fromId) {
     mp.roundActive = !!data.roundActive;
     mp.waiting = !!data.roundActive;
     applyRemoteRegion(data);
+    if (data.visibility) mp.visibility = data.visibility;
+    if (data.title) mp.roomTitle = data.title;
     if (data.scope) setLobbyScope(data.scope);
-    if (data.mode) selectLobbyMode(data.mode);
+    selectLobbyMode("guess");
     if (data.city != null) el.lobbyCity.value = data.city;
     applyRoster(data.roster);
     applyLobbySetup();
@@ -858,8 +998,10 @@ function handleNetData(data, fromId) {
   } else if (data.t === "roster") {
     mp.roundActive = !!data.roundActive;
     applyRemoteRegion(data);
+    if (data.visibility) mp.visibility = data.visibility;
+    if (data.title) mp.roomTitle = data.title;
     if (data.scope) setLobbyScope(data.scope);
-    if (data.mode) selectLobbyMode(data.mode);
+    selectLobbyMode("guess");
     if (data.city != null) el.lobbyCity.value = data.city;
     applyRoster(data.players);
     applyLobbySetup();
@@ -874,7 +1016,7 @@ function handleNetData(data, fromId) {
     if (data.city != null) el.lobbyCity.value = data.city;
     mp.myReady = false;
     for (const p of mp.players.values()) p.ready = false;
-    selectLobbyMode(data.mode);
+    selectLobbyMode("guess");
   } else if (data.t === "city") {
     el.lobbyCity.value = data.city || "";
   } else if (data.t === "plane") {
@@ -987,6 +1129,7 @@ function handlePeerLeft(peerId) {
 }
 
 function handleNetError(err) {
+  if (mp.host && err?.type === "peer-unavailable") return;
   if (err?.type === "unavailable-id" && mp.host && mp.roomId) {
     openGuestLobby(mp.roomId);
     return;
@@ -1000,6 +1143,7 @@ function handleNetError(err) {
 }
 
 function closeRoom() {
+  stopPublishing();
   mp.net?.destroy();
   mp.net = null;
   mp.roomId = "";
@@ -1010,6 +1154,7 @@ function closeRoom() {
   mp.waiting = false;
   mp.inRound = false;
   mp.roundActive = false;
+  mp.phase = "lobby";
   mp.players.clear();
   mp.guesses.clear();
   mp.poses.clear();
@@ -1024,11 +1169,14 @@ function closeRoom() {
   disposeAllMates();
 }
 
-function openHostLobby(existingId) {
+function openHostLobby(existingId, opts = {}) {
+  closeDirectory();
   closeRoom();
   mp.active = true;
   mp.host = true;
   mp.myName = "Host";
+  mp.visibility = opts.visibility === "private" ? "private" : "public";
+  mp.roomTitle = (opts.title || "").trim().slice(0, 32);
   if (existingId) mp.roomId = existingId;
   selectLobbyMode("guess");
   showLobby();
@@ -1040,7 +1188,13 @@ function openHostLobby(existingId) {
       rememberHost(id);
       history.replaceState(null, "", `#r=${id}`);
       el.lobbyLink.value = roomLink(id);
+      publishRoom();
       renderLobby();
+      setLobbyStatus(
+        mp.visibility === "private"
+          ? `Private room ready — share the code ${id}`
+          : "Public room is live — friends can join from the room list"
+      );
     },
     onPeer: handlePeerJoined,
     onData: handleNetData,
@@ -1049,9 +1203,15 @@ function openHostLobby(existingId) {
     onError: handleNetError,
   }, existingId);
   attachNet(api);
+  setTimeout(() => {
+    if (mp.host && mp.active && !mp.myId) {
+      setLobbyStatus("Could not open the room – try again in a moment", true);
+    }
+  }, 12000);
 }
 
 function openGuestLobby(id) {
+  closeDirectory();
   closeRoom();
   mp.active = true;
   mp.host = false;
@@ -1078,71 +1238,26 @@ function openGuestLobby(id) {
   attachNet(api);
 }
 
-function tryStartMp() {
-  if (!mp.host || !mp.myReady || mp.roundActive) return;
-  const others = otherPlayers().filter((p) => !p.waiting);
-  if (!others.length || others.some((p) => !p.ready)) return;
-  launchMpRound();
-}
+function tryStartMp() {}
 
 async function launchMpRound() {
   if (mp.launching) return;
   mp.launching = true;
+  mode = "guess";
+  mp.waiting = false;
+  for (const p of mp.players.values()) {
+    p.waiting = false;
+    p.ready = false;
+  }
   el.lobbyStart.disabled = true;
-  showMpWait(mode === "guess" ? "Picking a new point…" : "Preparing the flight…");
+  showMpWait("Picking a new point…");
   try {
-    if (mode === "guess") {
-      const scope = GUESS_SCOPES[guessScope];
-      setLobbyStatus(scope.status);
-      const p = pickGuessStart(guessScope);
-      const msg = { t: "start", mode, lat: p.lat, lon: p.lon, scope: guessScope, seats: buildSeats(), ...regionPayload() };
-      mp.net?.send(msg);
-      startMpFlight(msg);
-    } else if (mode === "home") {
-      const addr = el.lobbyCity.value.trim();
-      if (!addr) {
-        mp.launching = false;
-        hideMpWait();
-        setLobbyStatus("Enter your home address", true);
-        el.lobbyStart.disabled = false;
-        return;
-      }
-      setLobbyStatus("Looking up address…");
-      const loc = await geocodeCity(addr);
-      if (!loc) {
-        mp.launching = false;
-        hideMpWait();
-        setLobbyStatus("Could not find that address", true);
-        el.lobbyStart.disabled = false;
-        return;
-      }
-      const start = offsetPoint(loc.lat, loc.lon, 20 + Math.random() * 10);
-      const msg = {
-        t: "start",
-        mode,
-        lat: start.lat,
-        lon: start.lon,
-        homeLat: loc.lat,
-        homeLon: loc.lon,
-        seats: buildSeats(),
-      };
-      mp.net?.send(msg);
-      startMpFlight(msg);
-    } else {
-      const city = el.lobbyCity.value.trim() || "Niepruszewo";
-      setLobbyStatus(`Looking up: ${city}…`);
-      const loc = await geocodeCity(city);
-      if (!loc) {
-        mp.launching = false;
-        hideMpWait();
-        setLobbyStatus(`Could not find “${city}”`, true);
-        el.lobbyStart.disabled = false;
-        return;
-      }
-      const msg = { t: "start", mode, lat: loc.lat, lon: loc.lon, seats: buildSeats() };
-      mp.net?.send(msg);
-      startMpFlight(msg);
-    }
+    const scope = GUESS_SCOPES[guessScope];
+    setLobbyStatus(scope.status);
+    const p = pickGuessStart(guessScope);
+    const msg = { t: "start", mode: "guess", lat: p.lat, lon: p.lon, scope: guessScope, seats: buildSeats(), ...regionPayload() };
+    mp.net?.send(msg);
+    startMpFlight(msg);
   } catch {
     mp.launching = false;
     hideMpWait();
@@ -1258,8 +1373,12 @@ async function startMpFlight(msg) {
   mp.launching = false;
   mp.goAt = 0;
   markRoundStarted(mp.seats);
+  mp.phase = "fly";
+  mp.markLeft = 0;
+  mp.resultsLeft = 0;
   homeTarget = msg.homeLat != null ? { lat: msg.homeLat, lon: msg.homeLon } : null;
-  timeLeft = mode === "guess" ? GUESS_TIME : mode === "home" ? HOME_TIME : 0;
+  timeLeft = GUESS_TIME;
+  publishRoom();
   timerActive = false;
   menuOpen = true;
   guessOpen = false;
@@ -1471,7 +1590,10 @@ function setLobbyScope(scope, broadcast = false) {
   document.querySelectorAll("#lobby-scopes .scope-btn").forEach((b) =>
     b.classList.toggle("selected", b.dataset.scope === scope)
   );
-  if (broadcast && mp.host && mp.net) mp.net.send({ t: "scope", scope, ...regionPayload() });
+  if (broadcast && mp.host && mp.net) {
+    mp.net.send({ t: "scope", scope, ...regionPayload() });
+    publishRoom();
+  }
 }
 document.querySelectorAll("#lobby-scopes .scope-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
@@ -1953,10 +2075,31 @@ el.btnSolo.addEventListener("click", () => {
 });
 el.btnMulti.addEventListener("click", () => {
   unlockAudio();
-  openHostLobby();
+  showRooms();
+});
+el.roomsBack?.addEventListener("click", () => showLanding());
+el.btnCreatePublic?.addEventListener("click", () => {
+  unlockAudio();
+  openHostLobby(null, { visibility: "public", title: el.roomTitle?.value || "" });
+});
+el.btnCreatePrivate?.addEventListener("click", () => {
+  unlockAudio();
+  openHostLobby(null, { visibility: "private", title: el.roomTitle?.value || "" });
+});
+el.btnJoinCode?.addEventListener("click", () => {
+  const id = parseJoinCode(el.roomCode?.value);
+  if (!id) {
+    setRoomsStatus("Enter a room code or invite link", true);
+    return;
+  }
+  unlockAudio();
+  openGuestLobby(id);
+});
+el.roomCode?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") el.btnJoinCode?.click();
 });
 el.menuBack.addEventListener("click", () => showLanding());
-el.lobbyBack.addEventListener("click", () => showLanding());
+el.lobbyBack.addEventListener("click", () => showRooms());
 el.lobbyCopy.addEventListener("click", async () => {
   const link = el.lobbyLink.value;
   if (!link) return;
@@ -1970,18 +2113,16 @@ el.lobbyCopy.addEventListener("click", async () => {
 });
 el.lobbyStart.addEventListener("click", () => {
   unlockAudio();
+  if (!mp.host) {
+    setLobbyStatus("Waiting for the host to start the match");
+    return;
+  }
   if (mp.waiting || (mp.roundActive && !mp.inRound)) {
     setLobbyStatus("Round in progress – you will join the next one");
     return;
   }
-  if (playablePlayers().length < 2) {
-    setLobbyStatus("Wait until someone joins from the link first", true);
-    return;
-  }
-  mp.myReady = !mp.myReady;
-  mp.net?.send({ t: "ready", ready: mp.myReady, from: mp.myId });
-  renderLobby();
-  tryStartMp();
+  if (mp.roundActive || mp.launching) return;
+  launchMpRound();
 });
 
 const joinId = parseRoomFromUrl();
@@ -2036,9 +2177,17 @@ function openGuessMap() {
   el.gmRetry.style.display = "none";
   el.gmClose.textContent = mp.active ? "Back to room" : "Back to menu";
   el.gmRetry.textContent = mp.active ? "Another round" : "Try again";
-  el.gmSub.textContent = mp.active
-    ? "Click where you were dropped – closest guess wins"
-    : GUESS_SCOPES[guessScope].sub;
+  if (mp.active) {
+    mp.phase = "mark";
+    mp.markLeft = MARK_TIME;
+    if (el.gmTitle) el.gmTitle.textContent = "Where are you?";
+    el.gmSub.textContent = "You have 10 seconds to mark the map";
+  } else {
+    if (el.gmTitle) el.gmTitle.textContent = "Where are you?";
+    if (el.gmTimer) el.gmTimer.textContent = "";
+    el.gmSub.textContent = GUESS_SCOPES[guessScope].sub;
+  }
+  updateGuessPhaseUi();
   el.guessmap.classList.add("show");
   const draw = () => requestAnimationFrame(() => drawGuessMap());
   if (geoCache) {
@@ -2049,14 +2198,36 @@ function openGuessMap() {
   GUESS_SCOPES[guessScope].load()
     .then((g) => {
       geoCache = g;
-      el.gmSub.textContent = mp.active
-        ? "Click where you were dropped – closest guess wins"
-        : GUESS_SCOPES[guessScope].sub;
+      if (mp.active && mp.phase === "mark") {
+        el.gmSub.textContent = "You have 10 seconds to mark the map";
+      } else if (!mp.active) {
+        el.gmSub.textContent = GUESS_SCOPES[guessScope].sub;
+      }
       draw();
     })
     .catch(() => {
       el.gmResult.textContent = "Could not load the map";
     });
+}
+
+function updateGuessPhaseUi() {
+  if (!el.gmTimer) return;
+  if (!mp.active) {
+    el.gmTimer.textContent = "";
+    return;
+  }
+  if (mp.phase === "mark") {
+    const sec = Math.max(0, Math.ceil(mp.markLeft));
+    el.gmTimer.textContent = `${sec}s to mark`;
+    if (el.gmTitle) el.gmTitle.textContent = "Where are you?";
+  } else if (mp.phase === "results") {
+    const sec = Math.max(0, Math.ceil(mp.resultsLeft));
+    el.gmTimer.textContent = `Next round in ${sec}s`;
+    if (el.gmTitle) el.gmTitle.textContent = "Results";
+    el.gmSub.textContent = "Scores are in — next location coming up";
+  } else {
+    el.gmTimer.textContent = "";
+  }
 }
 
 function maybeRevealGuesses() {
@@ -2070,10 +2241,12 @@ function maybeRevealGuesses() {
   revealMpGuesses();
 }
 
-function revealMpGuesses() {
+function revealMpGuesses(force = false) {
   if (!mp.truth || guessAnswered) return;
-  if (mp.guesses.size < inRoundPlayers().length) return;
+  if (!force && mp.guesses.size < inRoundPlayers().length) return;
   guessAnswered = true;
+  mp.phase = "results";
+  mp.resultsLeft = RESULTS_TIME;
   const marks = [
     { lat: mp.truth.lat, lon: mp.truth.lon, color: "#d8a24a", label: "You were here", truth: true },
   ];
@@ -2083,25 +2256,32 @@ function revealMpGuesses() {
     results.push({ id, err, name: playerName(id) });
     marks.push({ lat: g.lat, lon: g.lon, color: playerColor(id), label: playerName(id) });
   }
+  for (const p of inRoundPlayers()) {
+    if (!mp.guesses.has(p.id)) results.push({ id: p.id, err: Infinity, name: playerName(p.id) });
+  }
   drawGuessMap(marks);
   results.sort((a, b) => a.err - b.err);
-  const best = results[0]?.err ?? 0;
-  const winners = results.filter((r) => r.err - best < 0.5);
+  const marked = results.filter((r) => Number.isFinite(r.err));
+  const best = marked[0]?.err ?? 0;
+  const winners = marked.filter((r) => r.err - best < 0.5);
   if (winners.length === 1) {
     const w = winners[0];
     if (w.id === mp.myId) mp.myScore += 1;
     else if (mp.players.has(w.id)) mp.players.get(w.id).score += 1;
   }
-  const line = results.map((r) => `${r.name} ${Math.round(r.err)} km`).join(" · ");
+  const line = results.map((r) => `${r.name} ${Number.isFinite(r.err) ? `${Math.round(r.err)} km` : "no mark"}`).join(" · ");
   el.gmResult.textContent =
-    winners.length > 1
-      ? `Tie – ${line}`
-      : winners[0]?.id === mp.myId
-        ? `You win – ${line}`
-        : `${winners[0]?.name} wins – ${line}`;
+    !winners.length
+      ? `No marks – ${line}`
+      : winners.length > 1
+        ? `Tie – ${line}`
+        : winners[0]?.id === mp.myId
+          ? `You win – ${line}`
+          : `${winners[0]?.name} wins – ${line}`;
   updateGuessScores();
-  el.gmClose.style.display = "";
-  el.gmRetry.style.display = "";
+  el.gmClose.style.display = "none";
+  el.gmRetry.style.display = "none";
+  updateGuessPhaseUi();
   if (mp.host) broadcastRoster();
 }
 
@@ -2610,6 +2790,17 @@ function tickFrame() {
       } else if (mode === "guess") {
         openGuessMap();
       }
+    }
+  }
+  if (mp.active && guessOpen && !paused && mp.inRound) {
+    if (mp.phase === "mark" && !guessAnswered) {
+      mp.markLeft -= dt;
+      if (frameCount % 8 === 0) updateGuessPhaseUi();
+      if (mp.markLeft <= 0) revealMpGuesses(true);
+    } else if (mp.phase === "results") {
+      mp.resultsLeft -= dt;
+      if (frameCount % 8 === 0) updateGuessPhaseUi();
+      if (mp.resultsLeft <= 0 && mp.host && !mp.launching) launchMpRound();
     }
   }
   if (mode === "home" && homeTarget && flying) {

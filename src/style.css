@@ -364,6 +364,7 @@ kbd {
 }
 
 #landing,
+#rooms,
 #lobby {
   position: fixed;
   inset: 0;
@@ -382,6 +383,7 @@ kbd {
 }
 
 #landing.hidden,
+#rooms.hidden,
 #lobby.hidden {
   opacity: 0;
   visibility: hidden;
@@ -438,6 +440,142 @@ kbd {
 .back-btn:hover { background: rgba(243, 234, 214, 0.08); }
 
 .landing-card { width: min(440px, calc(100vw - 48px)); }
+
+.rooms-card { width: min(640px, calc(100vw - 48px)); }
+
+.rooms-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 16px;
+  text-align: left;
+  min-height: 120px;
+  max-height: min(360px, 42vh);
+  overflow-y: auto;
+}
+
+.room-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: rgba(243, 234, 214, 0.05);
+  border: 1px solid rgba(243, 234, 214, 0.12);
+  border-radius: 8px;
+}
+
+.room-row.empty {
+  color: var(--muted);
+  font-style: italic;
+  justify-content: center;
+}
+
+.room-row .r-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.room-row .r-name {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.room-row .r-sub {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.room-row button {
+  flex: 0 0 auto;
+  padding: 10px 16px;
+  background: var(--gold);
+  border: none;
+  border-radius: 6px;
+  color: #1c1710;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.room-row button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+#room-title,
+#room-code {
+  width: 100%;
+  padding: 13px 16px;
+  margin-bottom: 10px;
+  background: rgba(243, 234, 214, 0.07);
+  border: 1px solid rgba(243, 234, 214, 0.2);
+  border-radius: 6px;
+  color: var(--paper);
+  font-family: inherit;
+  font-size: 16px;
+  outline: none;
+}
+
+#room-title:focus,
+#room-code:focus { border-color: var(--gold); }
+
+.rooms-create,
+.rooms-join {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.rooms-create button,
+#btn-join-code {
+  flex: 1;
+  padding: 14px 16px;
+  background: var(--gold);
+  border: none;
+  border-radius: 6px;
+  color: #1c1710;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.rooms-create button.ghost {
+  background: transparent;
+  border: 1px solid rgba(243, 234, 214, 0.28);
+  color: var(--paper);
+}
+
+#rooms-status {
+  min-height: 18px;
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+#rooms-status.err { color: #ff9d7a; }
+
+.lobby-vis {
+  margin: -8px 0 16px;
+  color: var(--gold);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.gm-timer {
+  margin: 0 0 8px;
+  min-height: 20px;
+  color: var(--gold);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
 
 .lobby-card {
   width: min(760px, calc(100vw - 48px));
@@ -1170,6 +1308,7 @@ kbd {
 @media (max-width: 720px), (max-height: 820px) {
   #menu,
   #landing,
+  #rooms,
   #lobby,
   #guessmap {
     align-items: start;
@@ -1178,6 +1317,7 @@ kbd {
 
   .menu-card,
   .lobby-card,
+  .rooms-card,
   .landing-card {
     width: min(760px, calc(100vw - 20px));
     padding: 22px 16px 18px;
@@ -1202,12 +1342,16 @@ kbd {
   }
 
   .start-row,
-  .lobby-link-row {
+  .lobby-link-row,
+  .rooms-create,
+  .rooms-join {
     flex-wrap: wrap;
   }
 
   #start-btn,
-  #lobby-copy {
+  #lobby-copy,
+  .rooms-create button,
+  #btn-join-code {
     width: 100%;
   }
 

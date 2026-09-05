@@ -44,10 +44,30 @@
       </div>
     </div>
 
+    <div id="rooms" class="hidden">
+      <div class="menu-card rooms-card">
+        <button id="rooms-back" class="back-btn" type="button">‹ Back</button>
+        <h1>Multiplayer</h1>
+        <p class="landing-sub">Guess the region — join a public room or host your own</p>
+        <div id="rooms-list" class="rooms-list"></div>
+        <p id="rooms-status"></p>
+        <input id="room-title" type="text" maxlength="32" placeholder="Room name (optional)" autocomplete="off" />
+        <div class="rooms-create">
+          <button id="btn-create-public" type="button">Create public room</button>
+          <button id="btn-create-private" class="ghost" type="button">Create private room</button>
+        </div>
+        <div class="rooms-join">
+          <input id="room-code" type="text" placeholder="Private code or invite link" autocomplete="off" />
+          <button id="btn-join-code" type="button">Join</button>
+        </div>
+      </div>
+    </div>
+
     <div id="lobby" class="hidden">
       <div class="menu-card lobby-card">
         <button id="lobby-back" class="back-btn" type="button">‹ Back</button>
-        <h1>Room</h1>
+        <h1 id="lobby-title">Room</h1>
+        <p id="lobby-vis" class="lobby-vis">Public · Guess the region</p>
         <div class="carousel lobby-carousel">
           <button id="lobby-car-prev" type="button" aria-label="Previous">‹</button>
           <canvas id="lobby-carousel-canvas"></canvas>
@@ -57,18 +77,7 @@
           <span id="lobby-car-name">Piper PA-28</span>
           <span id="lobby-car-desc">Light propeller – 170 km/h</span>
         </div>
-        <div class="modes lobby-modes">
-          <button class="mode-card selected" data-mode="guess" type="button">
-            <span class="m-name">Guess the region</span>
-          </button>
-          <button class="mode-card" data-mode="home" type="button">
-            <span class="m-name">Fly home</span>
-          </button>
-          <button class="mode-card" data-mode="free" type="button">
-            <span class="m-name">Free flight</span>
-          </button>
-        </div>
-        <p id="lobby-mode-desc"></p>
+        <p id="lobby-mode-desc">Fly for one minute, then mark the map in 10 seconds. Closest guess scores.</p>
         <div id="lobby-setup">
           <div id="lobby-scopes">
             <button class="scope-btn selected" data-scope="pl" type="button">🇵🇱 Poland</button>
@@ -84,7 +93,7 @@
         </div>
         <p id="lobby-status"></p>
         <p class="hint">Hold <kbd>T</kbd> to talk – the other player will hear you</p>
-        <button id="lobby-start" type="button">Start</button>
+        <button id="lobby-start" type="button">Start match</button>
       </div>
     </div>
 
@@ -150,9 +159,10 @@
       <div class="gm-card">
         <div class="gm-head">
           <span id="gm-score-left"></span>
-          <h2>Where are you?</h2>
+          <h2 id="gm-title">Where are you?</h2>
           <span id="gm-score-right"></span>
         </div>
+        <p id="gm-timer" class="gm-timer"></p>
         <p class="sub" id="gm-sub">Click a point on the map of Poland</p>
         <canvas id="gm-canvas"></canvas>
         <p id="gm-result"></p>

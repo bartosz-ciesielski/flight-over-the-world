@@ -1,6 +1,6 @@
 import { Peer } from "peerjs";
 
-const PEER_OPTS = {
+export const PEER_OPTS = {
   debug: 0,
   secure: true,
   host: "0.peerjs.com",
@@ -25,7 +25,7 @@ const PEER_OPTS = {
   },
 };
 
-const CONNECT_OPTS = { reliable: true, serialization: "json" };
+export const CONNECT_OPTS = { reliable: true, serialization: "json" };
 
 function roomId() {
   return "lns" + Math.random().toString(36).slice(2, 8);
@@ -107,6 +107,14 @@ export function hostRoom(handlers, existingId) {
     },
     sendExcept(peerId, data) {
       each((c) => c.send(data), peerId);
+    },
+    connect(peerId) {
+      if (!peerId) return null;
+      try {
+        return peer.connect(peerId, CONNECT_OPTS);
+      } catch {
+        return null;
+      }
     },
     call(peerId, stream) {
       if (!peerId || !stream) return null;
