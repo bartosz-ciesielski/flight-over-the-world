@@ -7,11 +7,11 @@ const COOL_MS = 90 * 1000;
 
 /** Always-on photorealistic budget. Do not lower these when a key is throttled. */
 export const TILE_QUALITY = {
-  // Lower = sharper under the plane. Horizon uses errorFalloff so we
-  // spend Google's budget on what you actually look at.
-  errorTarget: 4,
-  errorFalloff: 12,
-  errorFalloffDensity: 2.5e-4,
+  // Lower = refine sooner / sharper. Light falloff keeps only the far
+  // haze coarse so trees and buildings start loading a few km out.
+  errorTarget: 3,
+  errorFalloff: 4,
+  errorFalloffDensity: 1e-4,
   maxJobs: 16,
   cacheTiles: 4000,
   cacheBytes: 2e9,
