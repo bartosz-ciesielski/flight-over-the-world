@@ -201,20 +201,50 @@ const HOME_BEACON_M = 1000;
 
 let camera, scene, renderer, tiles, sun, sky;
 let tileHoldUntil = 0;
+let tileHoldMs = 8000;
+let tile429Count = 0;
+let last429At = 0;
+let lastFailedRetryAt = 0;
+let lastTileErr = "";
+let pendingFailedRetry = false;
 const TILE_ERROR_TARGET = 10;
+const TILE_JOBS_OK = 10;
+const TILE_JOBS_SLOW = 4;
 
 function holdLoadedTiles() {
   if (!tiles) return;
-  tileHoldUntil = performance.now() + 12000;
+  const now = performance.now();
+  // kolejne 429 w krótkim czasie = dłuższa przerwa, nie walenie w ten sam limit
+  if (last429At && now - last429At < 25000) {
+    tileHoldMs = Math.min(90000, Math.round(tileHoldMs * 1.8));
+  } else if (!last429At || now - last429At > 120000) {
+    tileHoldMs = 8000;
+  }
+  last429At = now;
+  tile429Count += 1;
+  tileHoldUntil = now + tileHoldMs;
   tiles.downloadQueue.maxJobsPerOrigin = 0;
+  pendingFailedRetry = true;
 }
 
 function releaseTileHold() {
   if (!tiles || !tileHoldUntil) return;
-  if (performance.now() >= tileHoldUntil) {
-    tileHoldUntil = 0;
-    tiles.downloadQueue.maxJobsPerOrigin = 25;
-  }
+  if (performance.now() < tileHoldUntil) return;
+  tileHoldUntil = 0;
+  const recent = last429At && performance.now() - last429At < 120000;
+  tiles.downloadQueue.maxJobsPerOrigin = recent ? TILE_JOBS_SLOW : TILE_JOBS_OK;
+  retryFailedTiles(true);
+}
+
+function retryFailedTiles(force = false) {
+  if (!tiles || tileHoldUntil) return;
+  const failed = tiles.stats?.failed || 0;
+  if (!failed || (!force && !pendingFailedRetry)) return;
+  const now = performance.now();
+  if (!force && now - lastFailedRetryAt < 20000) return;
+  lastFailedRetryAt = now;
+  pendingFailedRetry = false;
+  tiles.resetFailedTiles();
 }
 let planeMesh, plane, beacon;
 let groundAlt = TERRAIN_ALT;
@@ -1943,6 +1973,7 @@ function init() {
   tiles.setResolutionFromRenderer(camera, renderer);
   tiles.setCamera(camera);
   tiles.errorTarget = TILE_ERROR_TARGET;
+  tiles.downloadQueue.maxJobsPerOrigin = TILE_JOBS_OK;
   tiles.lruCache.maxSize = 3000;
   tiles.lruCache.maxBytesSize = 1.5e9;
   tiles.addEventListener("load-tileset", () => {
@@ -1951,8 +1982,10 @@ function init() {
 
   // czytelny komunikat zamiast wiecznego ładowania
   tiles.addEventListener("load-error", (ev) => {
-    const msg = String(ev?.error?.message || "");
-    if (msg.includes("429") || msg.includes("error code 429")) holdLoadedTiles();
+    const msg = String(ev?.error?.message || ev?.error || "");
+    lastTileErr = msg.slice(0, 220);
+    pendingFailedRetry = true;
+    if (/429|403|502|503|quota|resource_exhausted|too many/i.test(msg)) holdLoadedTiles();
     if (!loaderDismissed) {
       loadError = ION_KEY
         ? "Cesium ion is not responding – check VITE_CESIUM_ION_KEY"
@@ -3234,6 +3267,7 @@ function tickFrame() {
       tiles.setCamera(camera);
       camera.updateMatrixWorld();
       releaseTileHold();
+      retryFailedTiles();
       tiles.update();
     }
   } else {
@@ -3243,6 +3277,7 @@ function tickFrame() {
     tiles.setCamera(camera);
     camera.updateMatrixWorld();
     releaseTileHold();
+    retryFailedTiles();
     tiles.update();
   }
 
@@ -3271,6 +3306,14 @@ function tickFrame() {
     ctxLost: !!window.__ctxLost,
     loading: tiles.isLoading,
     visibleTiles: tiles.visibleTiles?.size ?? -1,
+    tileFailed: tiles.stats?.failed ?? -1,
+    tileQueued: tiles.stats?.queued ?? -1,
+    tileDown: tiles.stats?.downloading ?? -1,
+    tileLoaded: tiles.stats?.loaded ?? -1,
+    tile429: tile429Count,
+    tileHoldMs: tileHoldUntil ? Math.max(0, Math.round(tileHoldUntil - performance.now())) : 0,
+    tileJobs: tiles.downloadQueue?.maxJobsPerOrigin ?? -1,
+    tileErr: lastTileErr,
     explosions: explosions.length,
     crashed,
     audio: engineDebug(),
