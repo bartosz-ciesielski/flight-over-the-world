@@ -199,6 +199,24 @@ const HOME_CAPTURE_M = 600;
 const HOME_BEACON_M = 1000;
 
 let camera, scene, renderer, tiles, sun, sky;
+let tileHoldUntil = 0;
+const TILE_ERROR_TARGET = 10;
+
+function holdLoadedTiles() {
+  if (!tiles) return;
+  tileHoldUntil = performance.now() + 12000;
+  tiles.resetFailedTiles();
+  tiles.errorTarget = 1e6;
+  tiles.group.visible = !menuOpen;
+}
+
+function releaseTileHold() {
+  if (!tiles || !tileHoldUntil) return;
+  if (performance.now() >= tileHoldUntil) {
+    tileHoldUntil = 0;
+    tiles.errorTarget = TILE_ERROR_TARGET;
+  }
+}
 let planeMesh, plane, beacon;
 let groundAlt = TERRAIN_ALT;
 let crashed = false;
@@ -1805,8 +1823,6 @@ function init() {
   camera = new PerspectiveCamera(70, innerWidth / innerHeight, 0.5, 1e8);
 
   tiles = new TilesRenderer();
-  let tileHoldUntil = 0;
-  let tileErrorTarget = 10;
   tiles.registerPlugin({
     name: "TILE_HOLD_PLUGIN",
     priority: -100,
@@ -1846,23 +1862,10 @@ function init() {
   scene.add(tiles.group);
   tiles.setResolutionFromRenderer(camera, renderer);
   tiles.setCamera(camera);
-  tiles.errorTarget = tileErrorTarget;
+  tiles.errorTarget = TILE_ERROR_TARGET;
   tiles.lruCache.maxSize = isMobile ? 1600 : 3000;
   tiles.lruCache.maxBytesSize = isMobile ? 2.8e8 : 1.5e9;
   if (isMobile) tiles.loadSiblings = false;
-
-  const holdLoadedTiles = () => {
-    tileHoldUntil = performance.now() + 12000;
-    tiles.resetFailedTiles();
-    tiles.errorTarget = 1e6;
-    tiles.group.visible = !menuOpen;
-  };
-  const releaseTileHold = () => {
-    if (tileHoldUntil && performance.now() >= tileHoldUntil) {
-      tileHoldUntil = 0;
-      tiles.errorTarget = tileErrorTarget;
-    }
-  };
 
   // czytelny komunikat zamiast wiecznego ładowania
   tiles.addEventListener("load-error", (ev) => {
