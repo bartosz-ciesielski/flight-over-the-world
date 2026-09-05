@@ -287,11 +287,15 @@ kbd {
   inset: 0;
   z-index: 6;
   display: grid;
-  place-items: center;
+  justify-items: center;
+  align-items: safe center;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   background:
     radial-gradient(circle at 70% 15%, rgba(216, 162, 74, 0.14), transparent 45%),
-    rgba(10, 14, 10, 0.66);
-  backdrop-filter: blur(6px);
+    #10160f;
   transition: opacity 0.35s ease;
 }
 
@@ -307,11 +311,15 @@ kbd {
   inset: 0;
   z-index: 8;
   display: grid;
-  place-items: center;
+  justify-items: center;
+  align-items: safe center;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   background:
     radial-gradient(circle at 70% 15%, rgba(216, 162, 74, 0.14), transparent 45%),
-    rgba(10, 14, 10, 0.66);
-  backdrop-filter: blur(6px);
+    #10160f;
   transition: opacity 0.35s ease;
 }
 
@@ -375,8 +383,6 @@ kbd {
 
 .lobby-card {
   width: min(760px, calc(100vw - 48px));
-  max-height: calc(100vh - 28px);
-  overflow-y: auto;
 }
 
 .lobby-carousel {
@@ -769,8 +775,9 @@ kbd {
   z-index: 11;
   display: grid;
   place-items: center;
-  background: rgba(10, 14, 10, 0.72);
-  backdrop-filter: blur(8px);
+  background:
+    radial-gradient(circle at 70% 15%, rgba(216, 162, 74, 0.14), transparent 45%),
+    #10160f;
 }
 
 #mp-wait.hidden { display: none; }
@@ -814,7 +821,11 @@ kbd {
   inset: 0;
   z-index: 9;
   display: grid;
-  place-items: center;
+  justify-items: center;
+  align-items: safe center;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   background: rgba(10, 14, 10, 0.72);
   backdrop-filter: blur(6px);
   opacity: 0;
@@ -981,3 +992,77 @@ kbd {
 }
 
 #btn-restart.ghost:hover { background: rgba(243, 234, 214, 0.08); }
+
+@media (max-width: 720px), (max-height: 820px) {
+  #menu,
+  #landing,
+  #lobby,
+  #guessmap {
+    align-items: start;
+    padding: 16px 0 32px;
+  }
+
+  .menu-card,
+  .lobby-card,
+  .landing-card {
+    width: min(760px, calc(100vw - 20px));
+    padding: 22px 16px 18px;
+  }
+
+  .menu-card h1 {
+    font-size: 28px;
+    margin-bottom: 10px;
+    padding: 0 56px;
+  }
+
+  #carousel-canvas,
+  #lobby-carousel-canvas {
+    height: 160px;
+  }
+
+  .modes,
+  .lobby-modes {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+
+  .start-row,
+  .lobby-link-row {
+    flex-wrap: wrap;
+  }
+
+  #start-btn,
+  #lobby-copy {
+    width: 100%;
+  }
+
+  #guess-scope,
+  #lobby-scopes {
+    min-height: 44px;
+  }
+
+  .scope-btn {
+    padding: 10px 6px;
+    font-size: 13px;
+  }
+
+  .gm-card {
+    width: min(1080px, calc(100vw - 20px));
+    padding: 18px 12px 20px;
+  }
+
+  .gm-head {
+    width: 100%;
+    gap: 8px;
+  }
+
+  .gm-head h2 {
+    font-size: 20px;
+  }
+
+  #gm-canvas {
+    width: 100%;
+    height: min(420px, 52vh);
+  }
+}
