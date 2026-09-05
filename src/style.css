@@ -216,15 +216,47 @@ kbd {
 }
 
 #minimap {
+  pointer-events: auto;
   position: absolute;
-  right: 32px;
-  bottom: 36px;
-  width: 180px;
-  height: 180px;
+  left: max(22px, env(safe-area-inset-left));
+  bottom: 28px;
+  width: 168px;
+  height: 168px;
+  padding: 0;
+  border: 1.5px solid rgba(243, 234, 214, 0.35);
   border-radius: 50%;
-  border: 2px solid rgba(243, 234, 214, 0.35);
-  background: #1a2418;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  background: #c9d4c0;
+  box-shadow:
+    0 12px 36px rgba(0, 0, 0, 0.42),
+    inset 0 0 0 3px rgba(14, 12, 9, 0.28);
+  overflow: hidden;
+  cursor: pointer;
+}
+
+#minimap[hidden] { display: none; }
+
+#mm-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+}
+
+.mm-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  min-width: 1.4em;
+  padding: 1px 6px;
+  border: 1px solid rgba(28, 23, 16, 0.28);
+  border-radius: 999px;
+  background: rgba(243, 234, 214, 0.82);
+  color: #1c1710;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.3;
 }
 
 .world-label {
@@ -1684,6 +1716,15 @@ kbd {
   #mp-tab {
     top: max(112px, calc(env(safe-area-inset-top) + 100px));
   }
+
+  #minimap {
+    left: max(12px, env(safe-area-inset-left));
+    bottom: max(168px, calc(env(safe-area-inset-bottom) + 152px));
+    width: 112px;
+    height: 112px;
+  }
+
+  .mm-hint { display: none; }
 
   #f-instruments {
     left: 10px;

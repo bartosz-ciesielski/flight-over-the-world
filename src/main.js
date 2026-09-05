@@ -59,7 +59,7 @@ import {
   applyTileQuality,
 } from "./game/tileAuth.js";
 import { createHoldParentTilesPlugin } from "./game/holdParentTiles.js";
-import { createFreeMap } from "./game/freeMap.js";
+import { createFreeMap, createMiniMap } from "./game/freeMap.js";
 
 // rakieta stoi pionowo (+Y) — połóż ją nosem do przodu (-Z, konwencja lotu)
 function prepareRocket(model) {
@@ -220,14 +220,14 @@ function onTileThrottle(status = 429) {
   lastTileErr = String(status);
   pendingFailedRetry = true;
   tileHoldUntil = 0;
-  applyTileQuality(tiles);
+  applyTileQuality(tiles, isMobile);
 }
 
 function releaseTileHold() {
   if (!tiles || !tileHoldUntil) return;
   if (performance.now() < tileHoldUntil) return;
   tileHoldUntil = 0;
-  applyTileQuality(tiles);
+  applyTileQuality(tiles, isMobile);
   retryFailedTiles(true);
 }
 
@@ -309,6 +309,9 @@ let menuOpen = true;
 let paused = false;
 let leaveOpen = false;
 let pendingSnap = false; // po teleporcie: jednorazowe dosadzenie na właściwą wysokość
+let crashGraceUntil = 0;
+let crashStreak = 0;
+const groundSamples = [];
 let startLat = 52.38871, startLon = 16.60069; // Niepruszewo
 let camOffset = PLANES.pa28.cam;
 
@@ -326,6 +329,8 @@ let snapLastGh = null; // dosadzenie dopiero gdy pomiar terenu się ustabilizuje
 let snapStableCount = 0;
 let snapFirstAt = 0;
 let geoCache = null;
+let geoCacheScope = null;
+let geoLoadId = 0;
 let beaconGrounded = false;
 const explosions = [];
 let shake = 0;
@@ -635,6 +640,8 @@ const el = {
   fmCanvas: document.getElementById("fm-canvas"),
   fmPlace: document.getElementById("fm-place"),
   fmClose: document.getElementById("fm-close"),
+  minimap: document.getElementById("minimap"),
+  mmCanvas: document.getElementById("mm-canvas"),
   lobbyCarCanvas: document.getElementById("lobby-carousel-canvas"),
   lobbyCarPrev: document.getElementById("lobby-car-prev"),
   lobbyCarNext: document.getElementById("lobby-car-next"),
@@ -651,24 +658,57 @@ const freeMap = createFreeMap({
   canvas: el.fmCanvas,
   place: el.fmPlace,
   close: el.fmClose,
+  onChange: () => updateLocationMaps(),
+});
+
+const miniMap = createMiniMap({
+  root: el.minimap,
+  canvas: el.mmCanvas,
+  onOpen: () => {
+    if (!freeMap.open) toggleFreeMap();
+  },
 });
 
 function canOpenFreeMap() {
   return mode === "free" && !menuOpen && !paused && !guessOpen && !crashed && !finished;
 }
 
+function poseForMaps() {
+  if (!plane) return null;
+  return {
+    lat: plane.latDeg,
+    lon: plane.lonDeg,
+    heading: plane.headingDeg,
+    name: el.place?.textContent || "",
+  };
+}
+
+function updateLocationMaps() {
+  const pose = poseForMaps();
+  const showMini = canOpenFreeMap() && !freeMap.open;
+  if (showMini && pose) {
+    miniMap.update(pose.lat, pose.lon, pose.heading);
+    miniMap.show();
+  } else {
+    miniMap.hide();
+  }
+  if (freeMap.open && pose) {
+    freeMap.update(pose.lat, pose.lon, pose.heading, pose.name);
+  }
+}
+
 function toggleFreeMap() {
   if (!canOpenFreeMap() && !freeMap.open) return;
-  if (freeMap.open) freeMap.hide();
-  else if (canOpenFreeMap()) {
-    freeMap.update(
-      plane.latDeg,
-      plane.lonDeg,
-      plane.headingDeg,
-      el.place?.textContent || ""
-    );
-    freeMap.show();
+  if (freeMap.open) {
+    freeMap.hide();
+    updateLocationMaps();
+    return;
   }
+  const pose = poseForMaps();
+  if (!pose || !canOpenFreeMap()) return;
+  freeMap.update(pose.lat, pose.lon, pose.heading, pose.name);
+  freeMap.show();
+  miniMap.hide();
 }
 
 // karuzela pojazdów — jeden duży podgląd, strzałki w bok
@@ -744,6 +784,8 @@ document.querySelectorAll("#menu .mode-card").forEach((btn) => {
 document.querySelectorAll("#menu .scope-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
     guessScope = btn.dataset.scope;
+    geoCache = null;
+    geoCacheScope = null;
     document.querySelectorAll("#menu .scope-btn").forEach((b) =>
       b.classList.toggle("selected", b === btn)
     );
@@ -771,6 +813,7 @@ function applyRemoteRegion(data) {
   if (!data || (!data.country && !data.continent)) return;
   setRegionPack(data.country, data.continent);
   geoCache = null;
+  geoCacheScope = null;
   applyRegionLabels();
 }
 
@@ -1760,7 +1803,12 @@ function markRoundStarted(seats) {
 
 async function startMpFlight(msg) {
   mode = msg.mode || "guess";
-  guessScope = msg.scope || guessScope;
+  const nextScope = msg.scope || guessScope;
+  if (nextScope !== guessScope) {
+    geoCache = null;
+    geoCacheScope = null;
+  }
+  guessScope = nextScope;
   mp.active = true;
   mp.guesses.clear();
   mp.poses.clear();
@@ -1873,6 +1921,7 @@ function applyGo(msg) {
   if (mp.host) mp.net?.send({ t: "go", ...payload });
   pendingSnap = false;
   awaitingSnap = false;
+  armCrashGrace();
   if (plane && payload.h != null) {
     plane.height = payload.h;
     plane.heading = payload.heading ?? 0;
@@ -1989,6 +2038,10 @@ function backToLobby() {
 }
 
 function setLobbyScope(scope, broadcast = false) {
+  if (guessScope !== scope) {
+    geoCache = null;
+    geoCacheScope = null;
+  }
   guessScope = scope;
   document.querySelectorAll("#lobby-scopes .scope-btn").forEach((b) =>
     b.classList.toggle("selected", b.dataset.scope === scope)
@@ -2037,8 +2090,8 @@ async function init() {
   scene.fog = new FogExp2(0x9dd0ea, 0.00007);
 
   renderer = new WebGLRenderer({
-    antialias: true,
-    powerPreference: "high-performance",
+    antialias: !isMobile,
+    powerPreference: isMobile ? "default" : "high-performance",
     alpha: false,
   });
   renderer.setClearColor(0x8ec8e8);
@@ -2111,11 +2164,11 @@ async function init() {
   }
   tilePool.onSwitch = () => {
     syncTileAuth(tiles, tilePool);
-    applyTileQuality(tiles);
+    applyTileQuality(tiles, isMobile);
     pendingFailedRetry = true;
   };
   tiles.registerPlugin(new TileCompressionPlugin({
-    disableMipmaps: false,
+    disableMipmaps: isMobile,
     compressIndex: true,
   }));
   tiles.registerPlugin(new UpdateOnChangePlugin());
@@ -2138,13 +2191,13 @@ async function init() {
   scene.add(tiles.group);
   tiles.setResolutionFromRenderer(camera, renderer);
   tiles.setCamera(camera);
-  applyTileQuality(tiles);
+  applyTileQuality(tiles, isMobile);
   const maxAniso = Math.min(16, renderer.capabilities.getMaxAnisotropy());
   tiles.addEventListener("load-model", ({ scene }) => {
     sharpenTileTextures(scene, isMobile ? Math.min(8, maxAniso) : maxAniso);
   });
   tiles.addEventListener("load-tileset", () => {
-    applyTileQuality(tiles);
+    applyTileQuality(tiles, isMobile);
     tilePool.rememberPluginSession(
       tiles.getPluginByName("GOOGLE_CLOUD_AUTH_PLUGIN"),
       tiles.rootURL
@@ -2340,6 +2393,9 @@ function resetFlight(latDeg, lonDeg) {
   snapStableCount = 0;
   snapFirstAt = 0;
   crashed = false;
+  crashStreak = 0;
+  crashGraceUntil = 0;
+  groundSamples.length = 0;
   finished = false;
   shake = 0;
   ctrl.roll = 0;
@@ -2351,7 +2407,7 @@ function resetFlight(latDeg, lonDeg) {
 
 function applyPixelRatio() {
   if (!renderer) return;
-  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, isMobile ? 1.25 : 2));
 }
 
 function sharpenTileTextures(root, anisotropy) {
@@ -2365,9 +2421,14 @@ function sharpenTileTextures(root, anisotropy) {
         const tex = mat[key];
         if (!tex || !tex.isTexture || tex.userData.foeSharp) continue;
         tex.userData.foeSharp = true;
-        tex.anisotropy = anisotropy;
-        tex.generateMipmaps = true;
-        tex.minFilter = LinearMipmapLinearFilter;
+        tex.anisotropy = isMobile ? Math.min(4, anisotropy) : anisotropy;
+        if (isMobile) {
+          tex.generateMipmaps = false;
+          tex.minFilter = LinearFilter;
+        } else {
+          tex.generateMipmaps = true;
+          tex.minFilter = LinearMipmapLinearFilter;
+        }
         tex.magFilter = LinearFilter;
         tex.needsUpdate = true;
       }
@@ -2390,22 +2451,49 @@ function frameAt(lat, lon, height, az, elv, roll) {
   return m;
 }
 
+const _probeOrigin = new Vector3();
+const _probeDir = new Vector3();
+const _probePoint = new Vector3();
+const _probeInv = new Matrix4();
+const _probeLla = {};
+
 function probeGround(lat, lon, refHeight) {
-  const origin = new Vector3();
-  WGS84_ELLIPSOID.getCartographicToPosition(lat, lon, refHeight + 100, origin);
-  origin.applyMatrix4(tiles.group.matrixWorld);
-  const dir = origin.clone().normalize().negate();
-  raycaster.set(origin, dir);
-  raycaster.far = refHeight + 1200; // musi sięgnąć poziomu morza nawet z wysokiego spawnu
+  WGS84_ELLIPSOID.getCartographicToPosition(lat, lon, refHeight + 100, _probeOrigin);
+  _probeOrigin.applyMatrix4(tiles.group.matrixWorld);
+  _probeDir.copy(_probeOrigin).normalize().negate();
+  raycaster.set(_probeOrigin, _probeDir);
+  raycaster.far = refHeight + 1200;
+  const prevFirst = raycaster.firstHitOnly;
+  raycaster.firstHitOnly = false;
   const hits = raycaster.intersectObject(tiles.group, true);
-  if (hits.length > 0) {
-    const lla = {};
-    const p = hits[0].point.clone();
-    p.applyMatrix4(tiles.group.matrixWorld.clone().invert());
-    WGS84_ELLIPSOID.getPositionToCartographic(p, lla);
-    return lla.height;
+  raycaster.firstHitOnly = prevFirst;
+  if (!hits.length) return null;
+  _probeInv.copy(tiles.group.matrixWorld).invert();
+  let best = Infinity;
+  const n = Math.min(hits.length, 12);
+  for (let i = 0; i < n; i++) {
+    _probePoint.copy(hits[i].point).applyMatrix4(_probeInv);
+    WGS84_ELLIPSOID.getPositionToCartographic(_probePoint, _probeLla);
+    if (_probeLla.height < best) best = _probeLla.height;
   }
-  return null;
+  return Number.isFinite(best) ? best : null;
+}
+
+function adoptGround(gh) {
+  if (pendingSnap || awaitingSnap) {
+    groundAlt = gh;
+    groundSamples.length = 0;
+    return;
+  }
+  groundSamples.push(gh);
+  if (groundSamples.length > 5) groundSamples.shift();
+  // drzewo / dach / gruby LOD są wyżej — prawdziwy grunt to najniższy pomiar
+  groundAlt = Math.min(...groundSamples);
+}
+
+function armCrashGrace(ms = 2500) {
+  crashGraceUntil = performance.now() + ms;
+  crashStreak = 0;
 }
 
 // czy punkt w świecie (np. końcówka skrzydła) jest w/bardzo blisko terenu
@@ -2435,7 +2523,9 @@ function wingHit() {
 }
 
 function crash() {
+  if (crashed) return;
   crashed = true;
+  crashStreak = 0;
   explosions.push(createExplosion(scene, planePos.clone()));
   playExplosionSound();
   shake = 1;
@@ -2608,6 +2698,7 @@ function finishSnapStart() {
     hidePlaceBadge();
   }
   setTimeout(clearStarting, 2500);
+  armCrashGrace();
 }
 
 function unlockAudio() {
@@ -2744,7 +2835,10 @@ function setPaused(v) {
   leaveOpen = false;
   paused = v;
   keys.clear();
-  if (v) freeMap.hide();
+  if (v) {
+    freeMap.hide();
+    miniMap.hide();
+  }
   syncPauseCopy();
   el.pause.classList.toggle("show", v);
 }
@@ -2771,6 +2865,7 @@ function backToMenu() {
   awaitingSnap = false;
   beacon.visible = false;
   freeMap.hide();
+  miniMap.hide();
   el.guessmap.classList.remove("show");
   hidePlaceBadge();
   el.start.disabled = false;
@@ -2782,9 +2877,31 @@ function backToMenu() {
 }
 
 // --- mapa zgadywania ---
-function drawGuessMap(marks = []) {
-  if (!geoCache) return;
-  GUESS_SCOPES[guessScope].draw(el.gmCanvas, geoCache, marks);
+function guessGeoReady() {
+  return !!(geoCache?.features?.length && geoCacheScope === guessScope);
+}
+
+function drawGuessMap(marks = [], tries = 0) {
+  if (!guessGeoReady()) return;
+  const canvas = el.gmCanvas;
+  if (canvas && (canvas.clientWidth < 8 || canvas.clientHeight < 8) && tries < 12) {
+    requestAnimationFrame(() => drawGuessMap(marks, tries + 1));
+    return;
+  }
+  GUESS_SCOPES[guessScope].draw(canvas, geoCache, marks);
+}
+
+function loadGuessGeo() {
+  if (guessGeoReady()) return Promise.resolve(geoCache);
+  const scope = guessScope;
+  const id = ++geoLoadId;
+  return GUESS_SCOPES[scope].load().then((g) => {
+    if (id !== geoLoadId || guessScope !== scope) return geoCache;
+    if (!g?.features?.length) throw new Error("empty map");
+    geoCache = g;
+    geoCacheScope = scope;
+    return g;
+  });
 }
 
 function openGuessMap() {
@@ -2810,14 +2927,13 @@ function openGuessMap() {
   updateGuessPhaseUi();
   el.guessmap.classList.add("show");
   const draw = () => requestAnimationFrame(() => drawGuessMap());
-  if (geoCache) {
+  if (guessGeoReady()) {
     draw();
     return;
   }
   el.gmSub.textContent = "Loading map…";
-  GUESS_SCOPES[guessScope].load()
-    .then((g) => {
-      geoCache = g;
+  loadGuessGeo()
+    .then(() => {
       if (mp.active && mp.phase === "mark") {
         el.gmSub.textContent = "You have 10 seconds to mark the map";
       } else if (!mp.active) {
@@ -2993,6 +3109,7 @@ window.addEventListener("keydown", (e) => {
     if (menuOpen) return;
     if (freeMap.open) {
       freeMap.hide();
+      updateLocationMaps();
       return;
     }
     if (mp.active) {
@@ -3372,7 +3489,7 @@ function tickFrame() {
     const refH = pendingSnap || awaitingSnap ? Math.max(plane.height, spawnHoldAlt()) : plane.height;
     const gh = probeGround(plane.lat, plane.lon, refH);
     if (gh !== null) {
-      groundAlt = gh;
+      adoptGround(gh);
       if (pendingSnap) {
         plane.height = gh + snapAgl();
         if (!snapFirstAt) snapFirstAt = performance.now();
@@ -3386,6 +3503,7 @@ function tickFrame() {
         const waited = performance.now() - snapFirstAt > 1500;
         if (snapStableCount >= need && waited) {
           pendingSnap = false;
+          armCrashGrace();
           if (awaitingSnap) {
             awaitingSnap = false;
             if (mp.active && mp.inRound) reportSnapped();
@@ -3398,15 +3516,20 @@ function tickFrame() {
   if (awaitingSnap && performance.now() - awaitingSnapSince > 20000) {
     awaitingSnap = false;
     pendingSnap = false;
+    armCrashGrace();
     if (snapLastGh !== null) plane.height = snapLastGh + snapAgl();
     if (mp.active && mp.inRound) reportSnapped();
     else finishSnapStart();
   }
   const agl = plane.height - groundAlt;
-  // bez kolizji podczas dosadzania — pomiar gruntu jeszcze się doprecyzowuje
-  if (flying && !pendingSnap && (agl < 4 || (frameCount % 4 === 0 && wingHit()))) {
-    crash();
-  }
+  // bez kolizji podczas dosadzania i chwilę po nim — LOD/rodzic potrafi
+  // podnieść "grunt" o dziesiątki metrów i udawać uderzenie
+  const canCrash = flying && !pendingSnap && performance.now() > crashGraceUntil;
+  const hitGround = canCrash && agl < 4;
+  const hitWing = canCrash && agl < 45 && wingHit();
+  if (hitGround || hitWing) crashStreak += 1;
+  else crashStreak = 0;
+  if (crashStreak >= 3) crash();
 
   // aktywne wybuchy
   for (let i = explosions.length - 1; i >= 0; i--) {
@@ -3465,17 +3588,7 @@ function tickFrame() {
   if (frameCount % 2 === 0) updateHud(agl);
   if (frameCount % 4 === 0) syncTouchUi();
   if (mode === "free" && !menuOpen && frameCount % 90 === 0) syncPlaceBadge();
-  if (freeMap.open) {
-    if (!canOpenFreeMap()) freeMap.hide();
-    else if (frameCount % 2 === 0) {
-      freeMap.update(
-        plane.latDeg,
-        plane.lonDeg,
-        plane.headingDeg,
-        el.place?.textContent || ""
-      );
-    }
-  }
+  if (frameCount % 2 === 0) updateLocationMaps();
 
   if (menuOpen) {
     tiles.group.visible = false;

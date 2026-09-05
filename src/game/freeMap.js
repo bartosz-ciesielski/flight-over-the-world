@@ -1,5 +1,11 @@
 const TILE = 256;
 const ZOOM = 12;
+const tileCache = new Map();
+const tileReady = new Set();
+
+function notifyTiles() {
+  for (const fn of tileReady) fn();
+}
 
 function lon2x(lon, z) {
   return ((lon + 180) / 360) * 2 ** z;
@@ -17,78 +23,86 @@ function tileUrl(z, x, y) {
   return `https://tile.openstreetmap.org/${z}/${tx}/${ty}.png`;
 }
 
-export function createFreeMap({ root, canvas, place, close }) {
-  const ctx = canvas.getContext("2d");
-  const cache = new Map();
-  let open = false;
-  let lastKey = "";
-  let pose = { lat: 0, lon: 0, heading: 0, name: "" };
-
-  function loadTile(z, x, y) {
-    const url = tileUrl(z, x, y);
-    let img = cache.get(url);
-    if (img) return img;
-    img = new Image();
-    img.crossOrigin = "anonymous";
-    img.decoding = "async";
-    img.onload = () => {
-      if (open) paint();
-    };
-    img.src = url;
-    cache.set(url, img);
-    if (cache.size > 80) {
-      const first = cache.keys().next().value;
-      cache.delete(first);
-    }
-    return img;
+function loadTile(z, x, y) {
+  const url = tileUrl(z, x, y);
+  let img = tileCache.get(url);
+  if (img) return img;
+  img = new Image();
+  img.crossOrigin = "anonymous";
+  img.decoding = "async";
+  img.onload = notifyTiles;
+  img.src = url;
+  tileCache.set(url, img);
+  if (tileCache.size > 120) {
+    const first = tileCache.keys().next().value;
+    tileCache.delete(first);
   }
+  return img;
+}
 
-  function paint() {
-    const w = canvas.width;
-    const h = canvas.height;
-    const cx = lon2x(pose.lon, ZOOM);
-    const cy = lat2y(pose.lat, ZOOM);
-    const originX = cx * TILE - w / 2;
-    const originY = cy * TILE - h / 2;
-    const x0 = Math.floor(originX / TILE);
-    const y0 = Math.floor(originY / TILE);
-    const x1 = Math.floor((originX + w) / TILE);
-    const y1 = Math.floor((originY + h) / TILE);
+function paintOsm(canvas, pose, markerScale = 1, clipCircle = false) {
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.save();
+  if (clipCircle) {
+    ctx.beginPath();
+    ctx.arc(w / 2, h / 2, Math.min(w, h) / 2, 0, Math.PI * 2);
+    ctx.clip();
+  }
+  const cx = lon2x(pose.lon, ZOOM);
+  const cy = lat2y(pose.lat, ZOOM);
+  const originX = cx * TILE - w / 2;
+  const originY = cy * TILE - h / 2;
+  const x0 = Math.floor(originX / TILE);
+  const y0 = Math.floor(originY / TILE);
+  const x1 = Math.floor((originX + w) / TILE);
+  const y1 = Math.floor((originY + h) / TILE);
 
-    ctx.fillStyle = "#c9d4c0";
-    ctx.fillRect(0, 0, w, h);
-    for (let ty = y0; ty <= y1; ty++) {
-      for (let tx = x0; tx <= x1; tx++) {
-        const img = loadTile(ZOOM, tx, ty);
-        if (img.complete && img.naturalWidth) {
-          ctx.drawImage(img, tx * TILE - originX, ty * TILE - originY, TILE, TILE);
-        }
+  ctx.fillStyle = "#c9d4c0";
+  ctx.fillRect(0, 0, w, h);
+  for (let ty = y0; ty <= y1; ty++) {
+    for (let tx = x0; tx <= x1; tx++) {
+      const img = loadTile(ZOOM, tx, ty);
+      if (img.complete && img.naturalWidth) {
+        ctx.drawImage(img, tx * TILE - originX, ty * TILE - originY, TILE, TILE);
       }
     }
+  }
 
-    const px = w / 2;
-    const py = h / 2;
-    ctx.save();
-    ctx.translate(px, py);
-    ctx.rotate((pose.heading * Math.PI) / 180);
-    ctx.beginPath();
-    ctx.moveTo(0, -16);
-    ctx.lineTo(11, 14);
-    ctx.lineTo(0, 8);
-    ctx.lineTo(-11, 14);
-    ctx.closePath();
-    ctx.fillStyle = "#d8a24a";
-    ctx.strokeStyle = "#1c1710";
-    ctx.lineWidth = 2;
-    ctx.fill();
-    ctx.stroke();
-    ctx.restore();
+  const px = w / 2;
+  const py = h / 2;
+  const s = markerScale;
+  ctx.save();
+  ctx.translate(px, py);
+  ctx.rotate((pose.heading * Math.PI) / 180);
+  ctx.beginPath();
+  ctx.moveTo(0, -16 * s);
+  ctx.lineTo(11 * s, 14 * s);
+  ctx.lineTo(0, 8 * s);
+  ctx.lineTo(-11 * s, 14 * s);
+  ctx.closePath();
+  ctx.fillStyle = "#d8a24a";
+  ctx.strokeStyle = "#1c1710";
+  ctx.lineWidth = Math.max(1.2, 2 * s);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
 
-    ctx.beginPath();
-    ctx.arc(px, py, 22, 0, Math.PI * 2);
-    ctx.strokeStyle = "rgba(28, 23, 16, 0.35)";
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(px, py, 22 * s, 0, Math.PI * 2);
+  ctx.strokeStyle = "rgba(28, 23, 16, 0.35)";
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.restore();
+}
+
+export function createFreeMap({ root, canvas, place, close, onChange }) {
+  let open = false;
+  let pose = { lat: 0, lon: 0, heading: 0, name: "" };
+
+  function paint() {
+    paintOsm(canvas, pose, 1);
   }
 
   function setOpen(v) {
@@ -97,7 +111,13 @@ export function createFreeMap({ root, canvas, place, close }) {
     if (open) paint();
   }
 
-  close?.addEventListener("click", () => setOpen(false));
+  close?.addEventListener("click", () => {
+    setOpen(false);
+    onChange?.(false);
+  });
+  tileReady.add(() => {
+    if (open) paint();
+  });
 
   return {
     get open() {
@@ -115,14 +135,50 @@ export function createFreeMap({ root, canvas, place, close }) {
     update(lat, lon, headingDeg, name) {
       pose = { lat, lon, heading: headingDeg, name: name || "" };
       if (place) place.textContent = pose.name || `${lat.toFixed(3)}°, ${lon.toFixed(3)}°`;
-      if (!open) return;
-      const key = `${Math.round(lat * 200)}:${Math.round(lon * 200)}`;
-      if (key !== lastKey) {
-        lastKey = key;
-        paint();
-      } else {
-        paint();
-      }
+      if (open) paint();
+    },
+  };
+}
+
+export function createMiniMap({ root, canvas, onOpen }) {
+  let visible = false;
+  let pose = { lat: 0, lon: 0, heading: 0 };
+
+  function paint() {
+    paintOsm(canvas, pose, 0.62, true);
+  }
+
+  function setVisible(v) {
+    const next = !!v;
+    if (visible === next) {
+      if (next) paint();
+      return;
+    }
+    visible = next;
+    if (root) root.hidden = !visible;
+    if (visible) paint();
+  }
+
+  root?.addEventListener("click", () => {
+    if (visible) onOpen?.();
+  });
+  tileReady.add(() => {
+    if (visible) paint();
+  });
+
+  return {
+    get visible() {
+      return visible;
+    },
+    show() {
+      setVisible(true);
+    },
+    hide() {
+      setVisible(false);
+    },
+    update(lat, lon, headingDeg) {
+      pose = { lat, lon, heading: headingDeg };
+      if (visible) paint();
     },
   };
 }

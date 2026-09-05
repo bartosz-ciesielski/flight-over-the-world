@@ -66,12 +66,25 @@ export function createBeacon() {
 
 let polandGeo = null;
 
-export async function loadPolandGeo() {
-  if (!polandGeo) {
-    const res = await fetch(asset("geo/poland.json"));
-    if (!res.ok) throw new Error("poland map " + res.status);
-    polandGeo = await res.json();
+async function fetchGeoJson(path) {
+  let last = new Error(path);
+  for (let i = 0; i < 3; i++) {
+    try {
+      const res = await fetch(asset(path));
+      if (!res.ok) throw new Error(`${path} ${res.status}`);
+      const geo = await res.json();
+      if (!geo?.features?.length) throw new Error(`${path} empty`);
+      return geo;
+    } catch (err) {
+      last = err;
+      await new Promise((r) => setTimeout(r, 280 * (i + 1)));
+    }
   }
+  throw last;
+}
+
+export async function loadPolandGeo() {
+  if (!polandGeo) polandGeo = await fetchGeoJson("geo/poland.json");
   return polandGeo;
 }
 
@@ -117,9 +130,7 @@ export function randomPointInPoland(geo) {
 let worldGeo = null;
 
 export async function loadWorldGeo() {
-  if (!worldGeo) {
-    worldGeo = await (await fetch(asset("geo/world-land.json"))).json();
-  }
+  if (!worldGeo) worldGeo = await fetchGeoJson("geo/world-land.json");
   return worldGeo;
 }
 
@@ -139,9 +150,7 @@ export function randomPointInWorld(geo) {
 let europeGeo = null;
 
 export async function loadEuropeGeo() {
-  if (!europeGeo) {
-    europeGeo = await (await fetch(asset("geo/europe.json"))).json();
-  }
+  if (!europeGeo) europeGeo = await fetchGeoJson("geo/europe.json");
   return europeGeo;
 }
 
@@ -326,6 +335,7 @@ export function unprojectContinent(x, y, w, h) {
 function drawGeoMap(canvas, geo, marks, project) {
   const dpr = Math.min(devicePixelRatio, 2);
   const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (w < 8 || h < 8) return;
   canvas.width = w * dpr;
   canvas.height = h * dpr;
   const ctx = canvas.getContext("2d");
@@ -334,7 +344,7 @@ function drawGeoMap(canvas, geo, marks, project) {
   ctx.fillStyle = "rgba(18, 24, 18, 0.9)";
   ctx.fillRect(0, 0, w, h);
 
-  for (const f of geo.features) {
+  for (const f of geo.features || []) {
     for (const poly of iterPolygons(f.geometry)) {
       for (const ring of poly) {
         ctx.beginPath();

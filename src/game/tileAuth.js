@@ -374,16 +374,16 @@ export function syncTileAuth(tiles, pool) {
   }
 }
 
-export function applyTileQuality(tiles) {
+export function applyTileQuality(tiles, mobile = false) {
   if (!tiles) return;
   tiles.errorTarget = TILE_QUALITY.errorTarget;
   tiles.errorFalloff = TILE_QUALITY.errorFalloff;
   tiles.errorFalloffDensity = TILE_QUALITY.errorFalloffDensity;
   tiles.loadAncestors = true;
-  tiles.loadSiblings = true;
-  tiles.downloadQueue.maxJobsPerOrigin = TILE_QUALITY.maxJobs;
-  tiles.lruCache.maxSize = TILE_QUALITY.cacheTiles;
-  tiles.lruCache.maxBytesSize = TILE_QUALITY.cacheBytes;
-  tiles.lruCache.minSize = 800;
-  tiles.lruCache.unloadPercent = 0.05;
+  tiles.loadSiblings = !mobile;
+  tiles.downloadQueue.maxJobsPerOrigin = mobile ? 8 : TILE_QUALITY.maxJobs;
+  tiles.lruCache.maxSize = mobile ? 900 : TILE_QUALITY.cacheTiles;
+  tiles.lruCache.maxBytesSize = mobile ? 4.5e8 : TILE_QUALITY.cacheBytes;
+  tiles.lruCache.minSize = mobile ? 180 : 800;
+  tiles.lruCache.unloadPercent = mobile ? 0.2 : 0.05;
 }
