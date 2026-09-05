@@ -39,6 +39,7 @@ import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { setLoader, hideLoader } from "./game/hud.js";
 import { createPlaneMesh, PlaneController } from "./game/plane.js";
+import { applyRotorState, spinRotors } from "./game/rotors.js";
 import { createCarousel } from "./game/menuPreview.js";
 import { createSky, SUN_DIR } from "./game/sky.js";
 import { drawAirspeed, drawAltimeter, drawCompass } from "./game/instruments.js";
@@ -1628,6 +1629,7 @@ function loadPlane(key) {
   if (planeMesh) scene.remove(planeMesh);
   planeMesh = createPlaneMesh(); // fallback na czas ładowania
   planeMesh.userData.key = key;
+  applyRotorState(planeMesh, true);
   scene.add(planeMesh);
 
   new GLTFLoader().load(spec.file, (gltf) => {
@@ -1649,6 +1651,7 @@ function loadPlane(key) {
     wrapper.add(model);
     wrapper.userData.prop = null;
     wrapper.userData.key = key;
+    applyRotorState(wrapper, true);
     scene.remove(planeMesh);
     planeMesh = wrapper;
     scene.add(planeMesh);
@@ -1700,6 +1703,7 @@ function loadMate(id, key) {
   disposeMate(id);
   const spec = PLANES[key];
   const placeholder = createPlaneMesh();
+  applyRotorState(placeholder, true);
   placeholder.visible = false;
   scene.add(placeholder);
   mp.mates.set(id, { mesh: placeholder, key });
@@ -1724,6 +1728,7 @@ function loadMate(id, key) {
     wrapper.add(model);
     wrapper.userData.key = key;
     wrapper.visible = cur.mesh.visible;
+    applyRotorState(wrapper, true);
     scene.remove(cur.mesh);
     scene.add(wrapper);
     mp.mates.set(id, { mesh: wrapper, key, marker: cur.marker });
@@ -2403,6 +2408,10 @@ function tickFrame() {
   planeMesh.quaternion.copy(planeQuat);
   if (planeMesh.userData.prop) {
     planeMesh.userData.prop.rotation.z += plane.speed * dt * 1.6;
+  }
+  spinRotors(planeMesh, dt, plane.speed);
+  for (const mate of mp.mates.values()) {
+    if (mate.mesh) spinRotors(mate.mesh, dt, plane.speed);
   }
 
   if (mp.active && !menuOpen && !guessOpen && !crashed) {

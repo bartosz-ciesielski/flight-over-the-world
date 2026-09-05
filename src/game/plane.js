@@ -105,7 +105,9 @@ export function createPlaneMesh() {
   spinner.position.z = -0.2;
   const bladeGeo = new BoxGeometry(0.16, 1.15, 0.04);
   const blade1 = new Mesh(bladeGeo, dark);
+  blade1.name = "helice";
   const blade2 = new Mesh(bladeGeo, dark);
+  blade2.name = "helice";
   blade2.rotation.z = Math.PI / 2;
   const disc = new Mesh(
     new CircleGeometry(1.15, 24),
@@ -117,6 +119,7 @@ export function createPlaneMesh() {
       depthWrite: false,
     })
   );
+  disc.name = "propdisc";
   propGroup.add(spinner, blade1, blade2, disc);
   propGroup.position.z = -3.55;
   plane.add(propGroup);

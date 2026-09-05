@@ -9,6 +9,7 @@ import {
   Group,
 } from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { applyRotorState } from "./rotors.js";
 
 // karuzela pojazdów w menu — jeden duży podgląd, strzałki przełączają model
 export function createCarousel(canvas, items, opts = {}) {
@@ -92,6 +93,7 @@ export function createCarousel(canvas, items, opts = {}) {
       });
       const group = new Group();
       group.add(model);
+      applyRotorState(group, false);
       models.set(item.key, { group, wingspan: item.wingspan });
       if (item.key === wantedKey && currentKey !== wantedKey) show(item.key);
     });
