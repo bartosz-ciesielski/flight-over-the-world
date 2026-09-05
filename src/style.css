@@ -15,6 +15,11 @@ html, body {
   background: #0a0e0a;
   font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
   color: var(--paper);
+  touch-action: manipulation;
+}
+
+button, .mode-card, .scope-btn {
+  touch-action: manipulation;
 }
 
 #game-canvas {

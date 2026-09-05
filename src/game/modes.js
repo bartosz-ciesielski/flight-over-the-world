@@ -67,7 +67,9 @@ let polandGeo = null;
 
 export async function loadPolandGeo() {
   if (!polandGeo) {
-    polandGeo = await (await fetch(asset("geo/poland.json"))).json();
+    const res = await fetch(asset("geo/poland.json"));
+    if (!res.ok) throw new Error("poland map " + res.status);
+    polandGeo = await res.json();
   }
   return polandGeo;
 }

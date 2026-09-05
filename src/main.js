@@ -197,6 +197,11 @@ let groundAlt = TERRAIN_ALT;
 let crashed = false;
 let finished = false;
 let loaderDismissed = false;
+let gameReady = false;
+const isMobile =
+  typeof navigator !== "undefined" &&
+  (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ||
+    (navigator.maxTouchPoints > 1 && matchMedia("(pointer: coarse)").matches));
 let loadError = null;
 let frameCount = 0;
 let selectedPlane = "pa28";
@@ -1393,25 +1398,30 @@ function init() {
   }
   setLoader("Start…", 0.4);
 
+  try {
   scene = new Scene();
   scene.background = new Color(0x8ec8e8);
   scene.fog = new FogExp2(0x9dd0ea, 0.00007);
 
-  renderer = new WebGLRenderer({ antialias: true });
+  renderer = new WebGLRenderer({
+    antialias: !isMobile,
+    powerPreference: isMobile ? "default" : "high-performance",
+    alpha: false,
+  });
   renderer.setClearColor(0x8ec8e8);
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setPixelRatio(Math.min(devicePixelRatio, isMobile ? 1.25 : 2));
   renderer.setSize(innerWidth, innerHeight);
   renderer.toneMapping = 4;
   renderer.toneMappingExposure = 1.1;
-  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.enabled = !isMobile;
   renderer.shadowMap.type = 2; // PCFSoft
   renderer.domElement.id = "game-canvas";
   document.body.appendChild(renderer.domElement);
 
   scene.add(new HemisphereLight(0xbfd8ee, 0x5a7048, 1.15));
   sun = new DirectionalLight(0xfff2dd, 2.0);
-  sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
+  sun.castShadow = !isMobile;
+  sun.shadow.mapSize.set(isMobile ? 512 : 2048, isMobile ? 512 : 2048);
   sun.shadow.camera.near = 1;
   sun.shadow.camera.far = 2500;
   sun.shadow.camera.left = -450;
@@ -1441,17 +1451,17 @@ function init() {
   tiles.registerPlugin(new UpdateOnChangePlugin());
   tiles.registerPlugin(new UnloadTilesPlugin());
   tiles.registerPlugin(new TilesFadePlugin());
-  tiles.registerPlugin(
-    new GLTFExtensionsPlugin({ dracoLoader: new DRACOLoader() })
-  );
+  const draco = new DRACOLoader();
+  draco.setDecoderPath("https://www.gstatic.com/draco/versioned/decoders/1.5.7/");
+  tiles.registerPlugin(new GLTFExtensionsPlugin({ dracoLoader: draco }));
   tiles.group.rotation.x = -Math.PI / 2;
   tiles.group.visible = false;
   scene.add(tiles.group);
   tiles.setResolutionFromRenderer(camera, renderer);
   tiles.setCamera(camera);
-  tiles.errorTarget = 10; // niżej = więcej zapytań niż Google nadąża strumieniować
-  tiles.lruCache.maxSize = 3000;
-  tiles.lruCache.maxBytesSize = 1.5e9;
+  tiles.errorTarget = isMobile ? 16 : 10;
+  tiles.lruCache.maxSize = isMobile ? 800 : 3000;
+  tiles.lruCache.maxBytesSize = isMobile ? 2.5e8 : 1.5e9;
 
   // czytelny komunikat zamiast wiecznego ładowania
   tiles.addEventListener("load-error", () => {
@@ -1498,6 +1508,11 @@ function init() {
   });
   window.__game = { get planeMesh() { return planeMesh; }, get plane() { return plane; }, get camera() { return camera; } };
   window.__scene = scene;
+  gameReady = true;
+  } catch (err) {
+    console.error(err);
+    setLoader("This phone could not start the 3D engine. Try Safari or Chrome, or a computer.", 0);
+  }
 }
 
 function loadPlane(key) {
@@ -1722,6 +1737,9 @@ function placeBeaconAt(latDeg, lonDeg) {
 
 // --- start gry ---
 async function startGame() {
+  if (!gameReady || !tiles || !plane) {
+    return menuFail("Still loading – tap Start again in a moment");
+  }
   el.start.disabled = true;
   el.menuError.textContent = "";
   try {
@@ -1752,8 +1770,9 @@ async function startGame() {
       timerActive = false; // włączy się po dosadzeniu (finishSnapStart)
       beginFlight(p.lat, p.lon);
     }
-  } catch {
-    menuFail("Error – check your network and try again");
+  } catch (err) {
+    console.error(err);
+    menuFail("Could not start – try again, or use a stronger connection");
   }
 }
 
@@ -1791,8 +1810,12 @@ function finishSnapStart() {
 }
 
 function unlockAudio() {
-  primeAudio();
-  primeMusic();
+  try {
+    primeAudio();
+    primeMusic();
+  } catch {
+    /* iOS can reject AudioContext; flight still works */
+  }
 }
 window.addEventListener("pointerdown", unlockAudio);
 window.addEventListener("keydown", unlockAudio);
@@ -2115,7 +2138,7 @@ bindHold(el.touchBoost, () => { touch.boost = true; }, () => { touch.boost = fal
 bindHold(el.touchBrake, () => { touch.brake = true; }, () => { touch.brake = false; });
 bindHold(el.touchTalk, () => startTalk(), () => stopTalk());
 el.touchPause?.addEventListener("click", () => setPaused(true));
-el.touch?.addEventListener("touchmove", (e) => e.preventDefault(), { passive: false });
+el.stick?.addEventListener("touchmove", (e) => e.preventDefault(), { passive: false });
 
 function syncTouchUi() {
   if (!el.touch) return;
