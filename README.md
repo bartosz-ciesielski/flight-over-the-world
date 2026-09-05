@@ -31,8 +31,6 @@ Lot nad fotorealistyczną Ziemią — zgadnij region, doleć do domu albo po pro
 - **Doleć do domu** — start ~30 km od wpisanego adresu, 10 minut na powrót.
 - **Swobodny lot** — wybierz miasto i lataj.
 
-W multiplayer te same tryby, samoloty obok siebie, głos na **T**.
-
 ## Sterowanie
 
 | Klawisz | Akcja |
