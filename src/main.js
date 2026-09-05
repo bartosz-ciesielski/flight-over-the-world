@@ -298,7 +298,80 @@ function randomUsername() {
 }
 
 const NICK_KEY = "foe-nick";
+const GUESS_STATS_KEY = "foe-guess-stats";
 let pendingJoinId = "";
+
+function loadGuessStats() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(GUESS_STATS_KEY) || "");
+    const n = Number(raw?.n) || 0;
+    const sum = Number(raw?.sum) || 0;
+    const min = Number(raw?.min);
+    const max = Number(raw?.max);
+    if (n > 0 && Number.isFinite(sum)) {
+      return {
+        n,
+        sum,
+        min: Number.isFinite(min) ? min : Infinity,
+        max: Number.isFinite(max) ? max : 0,
+      };
+    }
+  } catch {
+    /* ignore */
+  }
+  return { n: 0, sum: 0, min: Infinity, max: 0 };
+}
+
+let guessStats = loadGuessStats();
+
+function storeGuessStats() {
+  try {
+    localStorage.setItem(
+      GUESS_STATS_KEY,
+      JSON.stringify({
+        n: guessStats.n,
+        sum: guessStats.sum,
+        min: Number.isFinite(guessStats.min) ? guessStats.min : 0,
+        max: guessStats.max,
+      })
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+function fmtGuessKm(km) {
+  if (!Number.isFinite(km)) return "–";
+  return km < 10 ? `${km.toFixed(1)} km` : `${Math.round(km)} km`;
+}
+
+function recordSoloGuess(errKm) {
+  if (!Number.isFinite(errKm) || errKm < 0) return;
+  guessStats.n += 1;
+  guessStats.sum += errKm;
+  guessStats.min = Math.min(guessStats.min, errKm);
+  guessStats.max = Math.max(guessStats.max, errKm);
+  storeGuessStats();
+  renderGuessStats();
+}
+
+function renderGuessStats() {
+  if (!el.gmStats) return;
+  const solo = !mp.active;
+  el.gmStats.classList.toggle("hidden", !solo);
+  if (!solo) return;
+  if (!guessStats.n) {
+    if (el.gmAvg) el.gmAvg.textContent = "–";
+    if (el.gmMin) el.gmMin.textContent = "–";
+    if (el.gmMax) el.gmMax.textContent = "–";
+    if (el.gmStatsN) el.gmStatsN.textContent = "No guesses yet";
+    return;
+  }
+  if (el.gmAvg) el.gmAvg.textContent = fmtGuessKm(guessStats.sum / guessStats.n);
+  if (el.gmMin) el.gmMin.textContent = fmtGuessKm(guessStats.min);
+  if (el.gmMax) el.gmMax.textContent = fmtGuessKm(guessStats.max);
+  if (el.gmStatsN) el.gmStatsN.textContent = guessStats.n === 1 ? "1 guess" : `${guessStats.n} guesses`;
+}
 
 function savedNick() {
   try {
@@ -405,6 +478,13 @@ const el = {
   gmSub: document.getElementById("gm-sub"),
   gmScoreLeft: document.getElementById("gm-score-left"),
   gmScoreRight: document.getElementById("gm-score-right"),
+  gmStats: document.getElementById("gm-stats"),
+  gmAvg: document.getElementById("gm-avg"),
+  gmMin: document.getElementById("gm-min"),
+  gmMax: document.getElementById("gm-max"),
+  gmStatsN: document.getElementById("gm-stats-n"),
+  placeBox: document.getElementById("f-place-box"),
+  place: document.getElementById("f-place"),
   mpWait: document.getElementById("mp-wait"),
   mpWaitText: document.getElementById("mp-wait-text"),
   guessScope: document.getElementById("guess-scope"),
@@ -892,7 +972,7 @@ function renderTabList() {
   el.mpTabList.innerHTML = people.map((p) => {
     const pts = `${p.score} pt${p.score === 1 ? "" : "s"}`;
     const you = p.you ? " (You)" : "";
-    return `<div class="mp-tab-row"><span class="p-name${p.you ? " p-you" : ""}">${escapeHtml(p.name)}${you}</span><span class="p-score">${pts}</span></div>`;
+    return `<div class="mp-tab-row"><span class="p-name${p.you ? " p-you" : ""}"><i class="online-dot" aria-hidden="true"></i>${escapeHtml(p.name)}${you}</span><span class="p-score">${pts}</span></div>`;
   }).join("");
   el.mpTab.classList.remove("hidden");
 }
@@ -1003,7 +1083,7 @@ function playerRow(p, isSelf) {
     badge = "READY";
     cls = " ready";
   }
-  return `<div class="player-row${cls}"><div class="p-meta"><span>${p.name}${isSelf ? " (You)" : ""}</span><span class="p-plane">${plane}${pts}</span></div><span class="p-ready">${badge}</span></div>`;
+  return `<div class="player-row${cls}"><div class="p-meta"><span class="p-name"><i class="online-dot" aria-hidden="true"></i>${escapeHtml(p.name)}${isSelf ? " (You)" : ""}</span><span class="p-plane">${plane}${pts}</span></div><span class="p-ready">${badge}</span></div>`;
 }
 
 function applyLobbySetup() {
@@ -2149,6 +2229,63 @@ async function geocodeCity(name) {
   return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
 }
 
+let placeReq = 0;
+let lastPlaceAt = 0;
+let lastPlaceLat = 0;
+let lastPlaceLon = 0;
+
+function placeNameFromReverse(data) {
+  const a = data?.address || {};
+  return (
+    a.city ||
+    a.town ||
+    a.village ||
+    a.hamlet ||
+    a.municipality ||
+    a.suburb ||
+    data?.name ||
+    a.county ||
+    a.state ||
+    ""
+  );
+}
+
+function hidePlaceBadge() {
+  el.placeBox?.classList.remove("show");
+  if (el.place) el.place.textContent = "–";
+}
+
+function syncPlaceBadge() {
+  if (mode !== "free" || menuOpen || guessOpen || !plane) {
+    if (mode !== "free" || menuOpen) hidePlaceBadge();
+    return;
+  }
+  const now = performance.now();
+  const moved = lastPlaceAt
+    ? distanceM(plane.latDeg, plane.lonDeg, lastPlaceLat, lastPlaceLon)
+    : 1e9;
+  if (lastPlaceAt && now - lastPlaceAt < 5500 && moved < 2200) return;
+  lastPlaceAt = now;
+  lastPlaceLat = plane.latDeg;
+  lastPlaceLon = plane.lonDeg;
+  const token = ++placeReq;
+  const url =
+    "https://nominatim.openstreetmap.org/reverse?format=json&zoom=12&lat=" +
+    plane.latDeg +
+    "&lon=" +
+    plane.lonDeg;
+  fetch(url, { headers: { Accept: "application/json" } })
+    .then((res) => (res.ok ? res.json() : null))
+    .then((data) => {
+      if (token !== placeReq || mode !== "free" || menuOpen) return;
+      const name = placeNameFromReverse(data);
+      if (!name) return;
+      if (el.place) el.place.textContent = name;
+      el.placeBox?.classList.add("show");
+    })
+    .catch(() => {});
+}
+
 function placeBeaconAt(latDeg, lonDeg) {
   const gh = probeGround(latDeg * (Math.PI / 180), lonDeg * (Math.PI / 180), TERRAIN_ALT + 200);
   const base = gh !== null ? gh : TERRAIN_ALT;
@@ -2214,6 +2351,8 @@ function beginFlight(lat, lon) {
   resetFlight(lat, lon);
   el.timerBox.classList.toggle("show", mode !== "free");
   el.distBox.classList.remove("show");
+  lastPlaceAt = 0;
+  hidePlaceBadge();
   // menu zostaje we wszystkich trybach — gracz nie widzi wysokiego spawnu,
   // a samolot nie jest szarpany dosadzeniem w trakcie sterowania
   awaitingSnap = true;
@@ -2235,6 +2374,12 @@ function finishSnapStart() {
   timerActive = mode !== "free";
   clearError();
   updateMpPresence();
+  if (mode === "free") {
+    lastPlaceAt = 0;
+    syncPlaceBadge();
+  } else {
+    hidePlaceBadge();
+  }
   setTimeout(clearStarting, 2500);
 }
 
@@ -2398,6 +2543,7 @@ function backToMenu() {
   awaitingSnap = false;
   beacon.visible = false;
   el.guessmap.classList.remove("show");
+  hidePlaceBadge();
   el.start.disabled = false;
   el.menuError.textContent = "";
   el.landing.classList.add("hidden");
@@ -2531,6 +2677,7 @@ function revealMpGuesses(force = false) {
 }
 
 function updateGuessScores() {
+  renderGuessStats();
   if (!el.gmScoreLeft || !el.gmScoreRight) return;
   if (!mp.active) {
     el.gmScoreLeft.textContent = "";
@@ -2568,6 +2715,7 @@ el.gmCanvas.addEventListener("click", (e) => {
   }
   const errKm = distanceM(lat, lon, plane.latDeg, plane.lonDeg) / 1000;
   guessAnswered = true;
+  recordSoloGuess(errKm);
   drawGuessMap([
     { lat: plane.latDeg, lon: plane.lonDeg, color: "#d8a24a", label: "You were here", truth: true },
     { lat, lon, color: "#f3ead6", label: "Your guess" },
@@ -3076,6 +3224,7 @@ function tickFrame() {
   // HUD
   if (frameCount % 2 === 0) updateHud(agl);
   if (frameCount % 4 === 0) syncTouchUi();
+  if (mode === "free" && !menuOpen && frameCount % 90 === 0) syncPlaceBadge();
 
   if (menuOpen) {
     tiles.group.visible = false;

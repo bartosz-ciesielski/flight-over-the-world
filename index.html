@@ -182,7 +182,16 @@
         </div>
         <p id="gm-timer" class="gm-timer"></p>
         <p class="sub" id="gm-sub">Click a point on the map of Poland</p>
-        <canvas id="gm-canvas"></canvas>
+        <div class="gm-body">
+          <aside id="gm-stats" class="hidden">
+            <div class="gm-stats-kicker">Guess distance</div>
+            <div class="gm-stat"><span>Average</span><b id="gm-avg">–</b></div>
+            <div class="gm-stat"><span>Best</span><b id="gm-min">–</b></div>
+            <div class="gm-stat"><span>Worst</span><b id="gm-max">–</b></div>
+            <p id="gm-stats-n">No guesses yet</p>
+          </aside>
+          <canvas id="gm-canvas"></canvas>
+        </div>
         <p id="gm-result"></p>
         <div class="gm-actions">
           <button id="gm-retry" type="button" style="display: none">Try again</button>
@@ -221,6 +230,7 @@
       <div id="f-center">
         <div class="f-box" id="f-timer-box"><span class="f-label">Time left</span><span id="f-timer">10:00</span></div>
         <div class="f-box" id="f-dist-box"><span class="f-label">To target</span><span id="f-dist">–</span></div>
+        <div class="f-box" id="f-place-box"><span class="f-label">Over</span><span id="f-place">–</span></div>
       </div>
     </div>
 
