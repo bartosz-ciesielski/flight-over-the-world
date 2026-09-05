@@ -75,7 +75,6 @@ import {
   unprojectContinent,
   drawEuropeMap,
   loadWorldGeo,
-  randomPointInWorld,
   drawWorldMap,
   unprojectWorld,
 } from "./game/modes.js";
@@ -110,7 +109,6 @@ import {
 const GUESS_SCOPES = {
   pl: {
     load: loadCountryGeo,
-    random: randomPointInPoland,
     draw: drawPolandMap,
     unproject: unprojectCountry,
     sub: "Click a point on the map of Poland",
@@ -118,7 +116,6 @@ const GUESS_SCOPES = {
   },
   eu: {
     load: loadContinentGeo,
-    random: randomPointInEurope,
     draw: drawEuropeMap,
     unproject: unprojectContinent,
     sub: "Click a point on the map of Europe",
@@ -126,7 +123,6 @@ const GUESS_SCOPES = {
   },
   world: {
     load: loadWorldGeo,
-    random: randomPointInWorld,
     draw: drawWorldMap,
     unproject: unprojectWorld,
     sub: "Click a point on the world map",
