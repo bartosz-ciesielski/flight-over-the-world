@@ -8,6 +8,7 @@ export const EUROPE_BOTS = [
 ];
 
 export const BOT_ROTATE_SCORE = 5;
+const BOT_STORE = "foe-europe-bots";
 
 const BOT_NICKS = [
   "Mira", "Jonas", "Alba", "Nils", "Vera", "Otto", "Lena", "Erik",
@@ -32,6 +33,27 @@ export function isEuropeRoom(id) {
 
 export function isBotId(id) {
   return String(id || "").startsWith("foe-bot-");
+}
+
+export function loadBotPersist() {
+  try {
+    const rows = JSON.parse(localStorage.getItem(BOT_STORE) || "[]");
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveBotPersist(players) {
+  try {
+    const rows = EUROPE_BOTS.map((b) => {
+      const p = players?.get?.(b.id);
+      return { id: b.id, name: p?.name || b.name, score: Number(p?.score) || 0 };
+    });
+    localStorage.setItem(BOT_STORE, JSON.stringify(rows));
+  } catch {
+    /* ignore */
+  }
 }
 
 export function pinnedEuropeRoom(live) {
