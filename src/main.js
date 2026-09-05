@@ -389,26 +389,26 @@ const el = {
 };
 
 // karuzela pojazdów — jeden duży podgląd, strzałki w bok
-const carousel = createCarousel(
-  el.carCanvas,
-  PLANE_ORDER.map((k) => ({
-    key: k,
-    file: PLANES[k].file,
-    wingspan: PLANES[k].wingspan,
-    prepare: PLANES[k].prepare,
-  })),
-  { lite: liteMode }
-);
-const lobbyCarousel = createCarousel(
-  el.lobbyCarCanvas,
-  PLANE_ORDER.map((k) => ({
-    key: k,
-    file: PLANES[k].file,
-    wingspan: PLANES[k].wingspan,
-    prepare: PLANES[k].prepare,
-  })),
-  { lite: liteMode }
-);
+const planePreviewItems = PLANE_ORDER.map((k) => ({
+  key: k,
+  file: PLANES[k].file,
+  wingspan: PLANES[k].wingspan,
+  prepare: PLANES[k].prepare,
+}));
+const carousel = createCarousel(el.carCanvas, planePreviewItems, { mobile: isMobile });
+let lobbyCarousel = createCarousel(el.lobbyCarCanvas, planePreviewItems, {
+  lite: isMobile,
+  mobile: isMobile,
+});
+let lobbyCarouselLive = !isMobile;
+
+function ensureLobbyCarousel() {
+  if (lobbyCarouselLive) return;
+  lobbyCarousel.dispose();
+  lobbyCarousel = createCarousel(el.lobbyCarCanvas, planePreviewItems, { mobile: true });
+  lobbyCarouselLive = true;
+  lobbyCarousel.show(selectedPlane, 0);
+}
 let planeIdx = 0;
 function selectPlane(i, dir, silent = false) {
   planeIdx = (i + PLANE_ORDER.length) % PLANE_ORDER.length;
@@ -531,6 +531,7 @@ function showLobby() {
   el.menu.classList.add("hidden");
   el.lobby.classList.remove("hidden");
   carousel.setActive(false);
+  ensureLobbyCarousel();
   lobbyCarousel.setActive(true);
   applyLobbySetup();
   renderLobby();
@@ -1858,10 +1859,6 @@ function menuFail(msg) {
 function sleepPreviews() {
   carousel.setActive(false);
   lobbyCarousel.setActive(false);
-  if (liteMode) {
-    carousel.dispose();
-    lobbyCarousel.dispose();
-  }
 }
 
 function beginFlight(lat, lon) {

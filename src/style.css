@@ -219,11 +219,6 @@ kbd {
 }
 #crash-note[hidden] { display: none; }
 
-body.lite #carousel-canvas,
-body.lite #lobby-carousel-canvas {
-  display: none;
-}
-
 #loader {
   position: fixed;
   inset: 0;
@@ -1196,7 +1191,7 @@ body.lite #lobby-carousel-canvas {
 
   #carousel-canvas,
   #lobby-carousel-canvas {
-    height: 160px;
+    height: 210px;
   }
 
   .modes,

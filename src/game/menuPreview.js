@@ -24,8 +24,13 @@ export function createCarousel(canvas, items, opts = {}) {
     };
   }
 
-  const renderer = new WebGLRenderer({ canvas, antialias: true, alpha: true });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  const renderer = new WebGLRenderer({
+    canvas,
+    antialias: !opts.mobile,
+    alpha: true,
+    powerPreference: "low-power",
+  });
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, opts.mobile ? 1 : 2));
   renderer.setClearColor(0x000000, 0);
 
   const scene = new Scene();
