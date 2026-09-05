@@ -385,10 +385,10 @@ export function applyTileQuality(tiles, mobile = false) {
   const maxTiles = mobile ? 900 : TILE_QUALITY.cacheTiles;
   const maxBytes = mobile ? 4.5e8 : TILE_QUALITY.cacheBytes;
   tiles.lruCache.maxSize = maxTiles;
-  tiles.lruCache.minSize = maxTiles;
   tiles.lruCache.maxBytesSize = maxBytes;
-  // default minBytes is ~322MB — unused tiles were dumped as soon as
-  // you looked away, then downloaded again from scratch
-  tiles.lruCache.minBytesSize = maxBytes;
-  tiles.lruCache.unloadPercent = mobile ? 0.08 : 0.05;
+  // min must stay below max — if they match, the cache fills and
+  // refuses new tiles (blurry green after a teleport / new round)
+  tiles.lruCache.minSize = mobile ? 180 : 800;
+  tiles.lruCache.minBytesSize = mobile ? 2e8 : 8e8;
+  tiles.lruCache.unloadPercent = mobile ? 0.2 : 0.08;
 }

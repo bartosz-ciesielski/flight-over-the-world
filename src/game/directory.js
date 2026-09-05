@@ -45,6 +45,9 @@ export function connectDirectory(onRooms) {
   }
 
   bus.onMessage = (info) => put(info);
+  queueMicrotask(emit);
+  setTimeout(emit, 600);
+  setTimeout(emit, 1400);
   sweep = setInterval(() => {
     const now = Date.now();
     let changed = false;

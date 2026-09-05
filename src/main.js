@@ -91,11 +91,13 @@ import {
 import {
   EUROPE_ROOM_ID,
   EUROPE_BOTS,
+  BOT_ROTATE_SCORE,
   isEuropeRoom,
   isBotId,
   pinnedEuropeRoom,
   pickEuropeLandStart,
   pickBotGuess,
+  nextBotName,
 } from "./game/bots.js";
 import {
   detectLocale,
@@ -536,6 +538,7 @@ const mp = {
   myName: "Host",
   myReady: false,
   myScore: 0,
+  wantPlay: false,
   waiting: false,
   inRound: false,
   roundActive: false,
@@ -561,6 +564,7 @@ const mp = {
   phase: "lobby",
   markLeft: 0,
   resultsLeft: 0,
+  phaseLeft: 0,
 };
 
 const ctrl = { roll: 0, pitch: 0, throttle: 0 };
@@ -631,6 +635,7 @@ const el = {
   lobby: document.getElementById("lobby"),
   lobbyTitle: document.getElementById("lobby-title"),
   lobbyVis: document.getElementById("lobby-vis"),
+  lobbyPhase: document.getElementById("lobby-phase"),
   gmTitle: document.getElementById("gm-title"),
   gmTimer: document.getElementById("gm-timer"),
   btnSolo: document.getElementById("btn-solo"),
@@ -900,6 +905,7 @@ let directory = null;
 let publicRooms = [];
 let announceTimer = 0;
 let roomsLooking = false;
+let roomsLookTimer = 0;
 
 function setRoomsStatus(msg, isErr = false) {
   if (!el.roomsStatus) return;
@@ -956,14 +962,27 @@ function stopPublishing() {
   announceTimer = 0;
 }
 
+function finishRoomsLook() {
+  roomsLooking = false;
+  clearTimeout(roomsLookTimer);
+  roomsLookTimer = 0;
+  renderRoomList();
+}
+
+function beginRoomsLook(ms = 2200) {
+  roomsLooking = true;
+  clearTimeout(roomsLookTimer);
+  roomsLookTimer = setTimeout(finishRoomsLook, ms);
+  renderRoomList();
+}
+
 function ensureDirectory() {
   if (directory) return directory;
-  roomsLooking = true;
-  renderRoomList();
+  beginRoomsLook();
   directory = connectDirectory((rooms) => {
-    roomsLooking = false;
     publicRooms = rooms.filter((r) => r.id && r.visibility !== "private");
-    renderRoomList();
+    if (publicRooms.length) finishRoomsLook();
+    else renderRoomList();
   });
   return directory;
 }
@@ -973,10 +992,17 @@ function closeDirectory() {
   directory?.destroy();
   directory = null;
   publicRooms = [];
+  roomsLooking = false;
+  clearTimeout(roomsLookTimer);
+  roomsLookTimer = 0;
 }
 
 function renderRoomList() {
   if (!el.roomsList) return;
+  if (roomsLooking) {
+    el.roomsList.innerHTML = `<div class="room-row empty rooms-loading"><div class="spin" aria-hidden="true"></div><span>Looking for rooms…</span></div>`;
+    return;
+  }
   const live = publicRooms.filter((r) => r.id !== mp.roomId);
   const euLive = live.find((r) => isEuropeRoom(r.id));
   const others = live.filter((r) => !isEuropeRoom(r.id));
@@ -1087,8 +1113,12 @@ function showRooms() {
   rememberJoin("");
   rememberHost("");
   setRoomUrl("");
-  ensureDirectory();
-  renderRoomList();
+  if (!directory) ensureDirectory();
+  else {
+    directory.refresh();
+    if (!publicRooms.length) beginRoomsLook(1800);
+    else renderRoomList();
+  }
 }
 
 function showSoloMenu() {
@@ -1162,8 +1192,9 @@ function rosterPayload() {
       plane: selectedPlane,
       ready: mp.myReady,
       score: mp.myScore,
-      waiting: false,
+      waiting: mp.wantPlay && mp.roundActive && !mp.inRound,
       inRound: mp.inRound,
+      joined: mp.wantPlay,
     },
     ...otherPlayers().map((p) => ({
       id: p.id,
@@ -1173,8 +1204,44 @@ function rosterPayload() {
       score: p.score,
       waiting: !!p.waiting,
       inRound: !!p.inRound,
+      joined: !!p.joined || isBotId(p.id),
     })),
   ];
+}
+
+function phasePayload() {
+  let left = 0;
+  if (mp.phase === "fly") left = timeLeft;
+  else if (mp.phase === "mark") left = mp.markLeft;
+  else if (mp.phase === "results") left = mp.resultsLeft;
+  const phase = mp.roundActive ? mp.phase : "lobby";
+  mp.phaseLeft = left;
+  return { phase, left };
+}
+
+function applyPhaseInfo(data) {
+  if (!data) return;
+  if (data.phase) mp.phase = data.phase;
+  if (Number.isFinite(data.left)) mp.phaseLeft = data.left;
+}
+
+function humansWantPlay() {
+  if (mp.wantPlay) return true;
+  return otherPlayers().some((p) => p.joined && !isBotId(p.id));
+}
+
+function lobbyPhaseText() {
+  const phase = mp.roundActive ? mp.phase : "lobby";
+  const left = Math.max(0, Math.ceil(
+    Number.isFinite(mp.phaseLeft) ? mp.phaseLeft
+      : phase === "fly" ? timeLeft
+        : phase === "mark" ? mp.markLeft
+          : mp.resultsLeft
+  ));
+  if (phase === "fly") return `In flight — ${left}s left`;
+  if (phase === "mark") return `Marking the map — ${left}s left`;
+  if (phase === "results") return `Results — next round in ${left}s`;
+  return "In lobby — pick a plane, then join";
 }
 
 let tabListOpen = false;
@@ -1223,13 +1290,15 @@ function applyRoster(list = []) {
   for (const p of list) {
     if (p.id === mp.myId) {
       mp.myScore = p.score ?? mp.myScore;
-      mp.waiting = !!p.waiting;
-      mp.inRound = !!p.inRound;
+      if (!mp.wantPlay) {
+        mp.waiting = false;
+        mp.inRound = false;
+      }
       continue;
     }
     keep.add(p.id);
     const prev = mp.players.get(p.id) || {};
-    mp.players.set(p.id, { ...prev, ...p });
+    mp.players.set(p.id, { ...prev, ...p, joined: !!p.joined || isBotId(p.id) });
   }
   for (const id of [...mp.players.keys()]) {
     if (!keep.has(id)) {
@@ -1245,6 +1314,22 @@ function remainingPeerIds() {
   return [...new Set([mp.myId, ...mp.players.keys()].filter((id) => id && !isBotId(id)))].sort();
 }
 
+function europeBotNames() {
+  return EUROPE_BOTS.map((b) => mp.players.get(b.id)?.name || b.name);
+}
+
+function rotateEuropeBots() {
+  if (!mp.host || !europeRoomActive()) return;
+  const taken = [mp.myName, ...[...mp.players.values()].map((p) => p.name)];
+  for (const b of EUROPE_BOTS) {
+    const p = mp.players.get(b.id);
+    if (!p || (p.score || 0) < BOT_ROTATE_SCORE) continue;
+    p.score = 0;
+    p.name = nextBotName(taken);
+    taken.push(p.name);
+  }
+}
+
 function seedEuropeBots() {
   if (!europeRoomActive()) return;
   for (const b of EUROPE_BOTS) {
@@ -1252,12 +1337,13 @@ function seedEuropeBots() {
     mp.players.set(b.id, {
       ...prev,
       id: b.id,
-      name: b.name,
-      plane: b.plane,
+      name: prev.name || b.name,
+      plane: prev.plane || b.plane,
       ready: !!prev.ready,
-      score: prev.score || 0,
-      waiting: !!prev.waiting,
-      inRound: !!prev.inRound,
+      score: Number(prev.score) || 0,
+      waiting: false,
+      inRound: !!(mp.roundActive && prev.inRound),
+      joined: true,
     });
   }
 }
@@ -1450,17 +1536,27 @@ function resumeHostDuties() {
     setLobbyScope("eu");
     seedEuropeBots();
   }
+  const humanFlying = mp.inRound || otherPlayers().some((p) => p.inRound && !isBotId(p.id));
+  if (mp.roundActive && !humanFlying && !mp.wantPlay && !mp.launching) {
+    finishRoomRound();
+    mp.phase = "lobby";
+    seedEuropeBots();
+    broadcastRoster();
+    renderLobby();
+    updateMpPresence();
+    return;
+  }
   if (mp.phase === "results") {
-    if (mp.resultsLeft <= 0 && !mp.launching) launchMpRound();
+    if (mp.resultsLeft <= 0 && !mp.launching && humansWantPlay()) launchMpRound();
     else tryLaunchRematch();
-  } else if (europeRoomActive() && !mp.roundActive && !mp.launching) {
+  } else if (!mp.roundActive && !mp.launching && humansWantPlay()) {
     launchMpRound();
   } else {
     if (mp.roundActive && !mp.goSent) tryReleaseGo();
     checkRoundClear();
     tryLaunchRematch();
   }
-  if (europeRoomActive() && mp.roundActive) {
+  if (europeRoomActive() && mp.roundActive && mp.inRound) {
     snapEuropeBots();
     if (mp.goSent) initBotRuntime(plane?.height);
   }
@@ -1496,6 +1592,7 @@ function broadcastRoster() {
     visibility: mp.visibility,
     title: mp.roomTitle,
     city: el.lobbyCity.value,
+    ...phasePayload(),
     ...regionPayload(),
   });
   publishRoom();
@@ -1535,36 +1632,40 @@ function renderLobby() {
   el.lobbyVisSwitch?.classList.toggle("locked", !mp.host || europeRoomActive());
   if (el.lobbyTitle) el.lobbyTitle.textContent = roomTitleFromParams();
   if (el.lobbyVis) el.lobbyVis.textContent = playerCountLabel();
+  if (el.lobbyPhase) el.lobbyPhase.textContent = lobbyPhaseText();
 
-  const queued = mp.waiting || (mp.roundActive && !mp.inRound);
-  el.lobbyStart.disabled = queued || !mp.host || mp.roundActive || mp.launching || europeRoomActive();
-  el.lobbyStart.textContent = queued
-    ? "Wait for next round"
-    : europeRoomActive()
-      ? mp.roundActive || mp.launching ? "Match running" : "Starting…"
-      : mp.host
-        ? "Start match"
-        : "Waiting for host";
+  const inMatch = mp.inRound && mp.roundActive;
+  const queued = mp.wantPlay && mp.roundActive && !mp.inRound;
+  el.lobbyStart.disabled = inMatch || queued || mp.launching || mp.joining;
+  el.lobbyStart.textContent = mp.joining
+    ? "Joining room…"
+    : inMatch
+      ? "In match"
+      : queued
+        ? "Queued — next round"
+        : mp.launching
+          ? "Starting…"
+          : europeRoomActive() || !mp.host || mp.roundActive
+            ? "Join"
+            : "Start match";
 
-  if (queued) setLobbyStatus("Round in progress – you will join the next one");
-  else if (mp.joining) setLobbyStatus("Joining room…");
-  else if (europeRoomActive()) setLobbyStatus("Open Europe match — Mira and Jonas are already flying. Fly 60s, then mark the map.");
-  else if (!mp.host) setLobbyStatus(`Host picks the map. Fly 60s, mark in 10s, then the next round.`);
-  else setLobbyStatus(`Pick a country or continent, then start. Anyone can join this ${mp.visibility} room.`);
+  if (mp.joining) setLobbyStatus("Joining room…");
+  else if (queued) setLobbyStatus("Next round.");
+  else setLobbyStatus("");
 }
 
 function playerRow(p, isSelf) {
   const plane = PLANES[p.plane]?.name || "";
-  const pts = p.score ? ` · ${p.score} pts` : "";
-  let badge = "WAITING";
+  const pts = ` · ${p.score || 0} pts`;
+  let badge = "IN LOBBY";
   let cls = "";
-  if (p.waiting) {
-    badge = "QUEUED";
-    cls = " waiting";
-  } else if (p.inRound) {
+  if (p.inRound) {
     badge = "IN FLIGHT";
     cls = " ingame";
-  } else if (p.ready) {
+  } else if (p.waiting || (p.joined && mp.roundActive && !p.inRound)) {
+    badge = "QUEUED";
+    cls = " waiting";
+  } else if (p.ready || p.joined) {
     badge = "READY";
     cls = " ready";
   }
@@ -1674,7 +1775,6 @@ function handleNetData(data, fromId) {
 
   if (data.t === "hello") {
     if (!mp.host || !fromId) return;
-    const waiting = mp.roundActive;
     const name = uniquePlayerName(data.name);
     mp.players.set(fromId, {
       id: fromId,
@@ -1682,8 +1782,9 @@ function handleNetData(data, fromId) {
       plane: data.plane || "pa28",
       ready: false,
       score: 0,
-      waiting,
+      waiting: false,
       inRound: false,
+      joined: false,
     });
     mp.net.sendTo(fromId, {
       t: "welcome",
@@ -1692,6 +1793,7 @@ function handleNetData(data, fromId) {
       hostId: mp.myId,
       roster: rosterPayload(),
       roundActive: mp.roundActive,
+      ...phasePayload(),
       mode: "guess",
       scope: guessScope,
       visibility: mp.visibility,
@@ -1724,7 +1826,10 @@ function handleNetData(data, fromId) {
     if (data.name) mp.myName = data.name;
     applyHost(data.hostId || fromId);
     mp.roundActive = !!data.roundActive;
-    mp.waiting = !!data.roundActive;
+    mp.wantPlay = false;
+    mp.waiting = false;
+    mp.inRound = false;
+    applyPhaseInfo(data);
     applyRemoteRegion(data);
     if (data.visibility) mp.visibility = data.visibility;
     if (data.title) mp.roomTitle = data.title;
@@ -1750,6 +1855,7 @@ function handleNetData(data, fromId) {
     selectLobbyMode("guess");
     if (data.city != null) el.lobbyCity.value = data.city;
     considerHost(data.hostId || fromId);
+    applyPhaseInfo(data);
     applyRoster(data.players);
     applyLobbySetup();
     renderLobby();
@@ -1798,16 +1904,36 @@ function handleNetData(data, fromId) {
     if (data.from) mp.rematch.add(data.from);
     updateRematchWait();
     if (mp.host) tryLaunchRematch();
+  } else if (data.t === "join") {
+    const id = data.from;
+    if (id && mp.players.has(id)) {
+      const p = mp.players.get(id);
+      p.joined = true;
+      p.waiting = mp.roundActive;
+      p.plane = data.plane || p.plane;
+    }
+    if (mp.host) {
+      if (!mp.roundActive && !mp.launching && humansWantPlay()) launchMpRound();
+      else broadcastRoster();
+    }
+    renderLobby();
+  } else if (data.t === "phase") {
+    applyPhaseInfo(data);
+    if (data.roundActive != null) mp.roundActive = !!data.roundActive;
+    if (menuOpen) renderLobby();
   } else if (data.t === "start") {
-    if (data.seats && mp.myId && !data.seats[mp.myId]) {
+    applyRemoteRegion(data);
+    considerHost(data.hostId || fromId);
+    applyPhaseInfo(data);
+    const seated = !data.seats || !mp.myId || data.seats[mp.myId] != null;
+    if (!mp.wantPlay || !seated) {
       mp.roundActive = true;
-      mp.waiting = true;
+      mp.waiting = mp.wantPlay;
       mp.inRound = false;
+      mp.phase = data.phase || "fly";
       renderLobby();
       return;
     }
-    applyRemoteRegion(data);
-    considerHost(data.hostId || fromId);
     startMpFlight(data);
   } else if (data.t === "pose") {
     const id = data.from;
@@ -1909,6 +2035,7 @@ function closeRoom() {
   mp.hostId = "";
   mp.myReady = false;
   mp.myScore = 0;
+  mp.wantPlay = false;
   mp.waiting = false;
   mp.inRound = false;
   mp.roundActive = false;
@@ -1960,7 +2087,10 @@ function openHostLobby(existingId, opts = {}) {
       if (europeRoomActive()) {
         setLobbyScope("eu");
         seedEuropeBots();
-        resumeHostDuties();
+        mp.wantPlay = false;
+        mp.phase = "lobby";
+        broadcastRoster();
+        renderLobby();
         return;
       }
       renderLobby();
@@ -2017,15 +2147,16 @@ function tryStartMp() {}
 
 async function launchMpRound() {
   if (!mp.host || mp.launching) return;
+  if (!humansWantPlay()) return;
   mp.launching = true;
   mode = "guess";
-  mp.waiting = false;
+  if (mp.wantPlay) mp.waiting = false;
   for (const p of mp.players.values()) {
-    p.waiting = false;
+    if (p.joined || isBotId(p.id)) p.waiting = false;
     p.ready = false;
   }
   el.lobbyStart.disabled = true;
-  showMpWait("Picking a new point…");
+  if (mp.wantPlay) showMpWait("Picking a new point…");
   try {
     const scopeInfo = GUESS_SCOPES[europeRoomActive() ? "eu" : guessScope];
     setLobbyStatus(scopeInfo.status);
@@ -2035,9 +2166,28 @@ async function launchMpRound() {
     }
     const p = europeRoomActive() ? await pickEuropeLandStart() : await pickGuessStart(guessScope);
     const nextScope = europeRoomActive() ? "eu" : guessScope;
-    const msg = { t: "start", mode: "guess", lat: p.lat, lon: p.lon, scope: nextScope, seats: buildSeats(), hostId: mp.myId, ...regionPayload() };
+    const seats = buildSeats();
+    mp.phase = "fly";
+    timeLeft = GUESS_TIME;
+    const msg = {
+      t: "start",
+      mode: "guess",
+      lat: p.lat,
+      lon: p.lon,
+      scope: nextScope,
+      seats,
+      hostId: mp.myId,
+      ...phasePayload(),
+      ...regionPayload(),
+    };
     mp.net?.send(msg);
-    startMpFlight(msg);
+    if (seats[mp.myId]) startMpFlight(msg);
+    else {
+      armRoundState(msg);
+      mp.launching = false;
+      hideMpWait();
+      renderLobby();
+    }
   } catch {
     mp.launching = false;
     hideMpWait();
@@ -2049,9 +2199,9 @@ async function launchMpRound() {
 function buildSeats() {
   const seats = {};
   let i = 0;
-  seats[mp.myId] = i++;
+  if (mp.wantPlay) seats[mp.myId] = i++;
   for (const p of otherPlayers()) {
-    if (!p.waiting) seats[p.id] = i++;
+    if (isBotId(p.id) || p.joined) seats[p.id] = i++;
   }
   return seats;
 }
@@ -2128,15 +2278,16 @@ function offsetByIndex(lat, lon, index, total) {
 function markRoundStarted(seats) {
   mp.roundActive = true;
   mp.inRound = !!(seats && seats[mp.myId] != null);
-  mp.waiting = !mp.inRound;
+  mp.waiting = mp.wantPlay && !mp.inRound;
   mp.myReady = false;
   for (const p of mp.players.values()) {
     p.ready = false;
     p.inRound = !!(seats && seats[p.id] != null);
+    if (!p.joined && !isBotId(p.id)) p.inRound = false;
   }
 }
 
-async function startMpFlight(msg) {
+function armRoundState(msg) {
   mode = msg.mode || "guess";
   const nextScope = msg.scope || guessScope;
   if (nextScope !== guessScope) {
@@ -2162,9 +2313,32 @@ async function startMpFlight(msg) {
   mp.phase = "fly";
   mp.markLeft = 0;
   mp.resultsLeft = 0;
-  homeTarget = msg.homeLat != null ? { lat: msg.homeLat, lon: msg.homeLon } : null;
   timeLeft = GUESS_TIME;
   publishRoom();
+  if (mp.host && europeRoomActive()) {
+    seedEuropeBots();
+    snapEuropeBots();
+  }
+  if (mp.host) {
+    broadcastRoster();
+    const releaseIfSnapped = () => {
+      if (!mp.host || !mp.roundActive || mp.goSent) return;
+      if ([...mp.snapInfo.values()].some(isTerrainSnap)) applyGo();
+    };
+    setTimeout(releaseIfSnapped, 12000);
+    setTimeout(releaseIfSnapped, 22000);
+    if (!mp.seats[mp.myId]) {
+      setTimeout(() => {
+        if (!mp.host || mp.goSent || !mp.roundActive) return;
+        if ([...mp.snapInfo.values()].some(isTerrainSnap)) applyGo();
+      }, 2500);
+    }
+  }
+}
+
+async function startMpFlight(msg) {
+  armRoundState(msg);
+  homeTarget = msg.homeLat != null ? { lat: msg.homeLat, lon: msg.homeLon } : null;
   timerActive = false;
   menuOpen = true;
   guessOpen = false;
@@ -2184,15 +2358,6 @@ async function startMpFlight(msg) {
   seedAllMates(plane.height);
   if (mp.host && europeRoomActive()) snapEuropeBots();
   if (mode === "home" && homeTarget) placeBeaconAt(homeTarget.lat, homeTarget.lon);
-  if (mp.host) {
-    broadcastRoster();
-    const releaseIfSnapped = () => {
-      if (!mp.host || !mp.roundActive || mp.goSent) return;
-      if ([...mp.snapInfo.values()].some(isTerrainSnap)) applyGo();
-    };
-    setTimeout(releaseIfSnapped, 12000);
-    setTimeout(releaseIfSnapped, 22000);
-  }
 }
 
 function reportSnapped() {
@@ -2277,9 +2442,47 @@ function applyGo(msg) {
   finishSnapStart();
 }
 
+function tickHostRound(dt) {
+  if (!mp.host || !mp.roundActive || mp.launching) return;
+  const selfClock = mp.inRound && (timerActive || guessOpen);
+  if (!selfClock) {
+    if (mp.phase === "fly") {
+      timeLeft -= dt;
+      if (timeLeft <= 0) {
+        timeLeft = 0;
+        mp.phase = "mark";
+        mp.markLeft = MARK_TIME;
+        scheduleBotGuesses();
+        mp.net?.send({ t: "phase", roundActive: true, ...phasePayload() });
+      }
+    } else if (mp.phase === "mark") {
+      mp.markLeft -= dt;
+      if (mp.markLeft <= 0) revealMpGuesses(true);
+    } else if (mp.phase === "results") {
+      mp.resultsLeft -= dt;
+      if (mp.resultsLeft <= 0) {
+        if (humansWantPlay()) launchMpRound();
+        else {
+          finishRoomRound();
+          mp.phase = "lobby";
+          broadcastRoster();
+        }
+      }
+    }
+  }
+  if (mp.phase === "fly") mp.phaseLeft = timeLeft;
+  else if (mp.phase === "mark") mp.phaseLeft = mp.markLeft;
+  else if (mp.phase === "results") mp.phaseLeft = mp.resultsLeft;
+  if (frameCount % 45 === 0) {
+    mp.net?.send({ t: "phase", roundActive: true, ...phasePayload() });
+    if (menuOpen) renderLobby();
+  }
+}
+
 function leaveRound() {
   const wasIn = mp.inRound;
   mp.inRound = false;
+  mp.wantPlay = false;
   mp.myReady = false;
   if (wasIn) mp.net?.send({ t: "done", from: mp.myId });
   if (mp.host) {
@@ -3006,6 +3209,11 @@ function beginFlight(lat, lon) {
   markStarting();
   sleepPreviews();
   el.menuError.textContent = "Loading terrain…";
+  try {
+    tiles?.lruCache?.unloadUnusedContent?.();
+  } catch {
+    /* ignore */
+  }
   if (selectedPlane !== planeMesh?.userData?.key) loadPlane(selectedPlane);
   resetFlight(lat, lon);
   el.timerBox.classList.toggle("show", mode !== "free");
@@ -3131,18 +3339,23 @@ el.lobbyCopy.addEventListener("click", async () => {
     el.lobbyLink.select();
   }
 });
+function requestPlay() {
+  if (!mp.active || mp.joining || mp.launching) return;
+  if (mp.inRound && mp.roundActive) return;
+  mp.wantPlay = true;
+  mp.myReady = true;
+  mp.waiting = mp.roundActive;
+  mp.net?.send({ t: "join", from: mp.myId, plane: selectedPlane });
+  if (mp.host) {
+    if (!mp.roundActive && !mp.launching) launchMpRound();
+    else broadcastRoster();
+  }
+  renderLobby();
+}
+
 el.lobbyStart.addEventListener("click", () => {
   unlockAudio();
-  if (!mp.host) {
-    setLobbyStatus("Waiting for the host to start the match");
-    return;
-  }
-  if (mp.waiting || (mp.roundActive && !mp.inRound)) {
-    setLobbyStatus("Round in progress – you will join the next one");
-    return;
-  }
-  if (mp.roundActive || mp.launching) return;
-  launchMpRound();
+  requestPlay();
 });
 
 const joinId = parseRoomFromUrl() || savedJoin();
@@ -3363,6 +3576,7 @@ function revealMpGuesses(force = false) {
         : winners[0]?.id === mp.myId
           ? `You win – ${line}`
           : `${winners[0]?.name} wins – ${line}`;
+  rotateEuropeBots();
   updateGuessScores();
   el.gmClose.style.display = "none";
   el.gmRetry.style.display = "none";
@@ -3961,8 +4175,22 @@ function tickFrame() {
     } else if (mp.phase === "results") {
       mp.resultsLeft -= dt;
       if (frameCount % 8 === 0) updateGuessPhaseUi();
-      if (mp.resultsLeft <= 0 && mp.host && !mp.launching) launchMpRound();
+      if (mp.resultsLeft <= 0 && mp.host && !mp.launching) {
+        if (humansWantPlay()) launchMpRound();
+        else {
+          finishRoomRound();
+          mp.phase = "lobby";
+          broadcastRoster();
+        }
+      }
     }
+  }
+  tickHostRound(dt);
+  if (mp.active && !mp.host && menuOpen && mp.roundActive && !mp.inRound) {
+    mp.phaseLeft = Math.max(0, (mp.phaseLeft || 0) - dt);
+  }
+  if (mp.active && menuOpen && !mp.inRound && frameCount % 20 === 0) {
+    if (el.lobbyPhase) el.lobbyPhase.textContent = lobbyPhaseText();
   }
   if (mode === "home" && flying && frameCount % 8 === 0) recordHomePath();
   if (mode === "home" && homeTarget && flying) {

@@ -707,6 +707,18 @@ kbd {
   border-color: rgba(216, 162, 74, 0.35);
 }
 
+.room-row.rooms-loading {
+  flex-direction: column;
+  gap: 16px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.room-row.rooms-loading .spin {
+  width: 32px;
+  height: 32px;
+}
+
 .room-row.empty {
   flex: 1;
   min-height: 100%;
@@ -937,6 +949,13 @@ kbd {
 }
 
 #lobby-city:focus { border-color: var(--gold); }
+
+.lobby-phase {
+  margin: -4px 0 14px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--gold);
+}
 
 .lobby-players {
   display: flex;
