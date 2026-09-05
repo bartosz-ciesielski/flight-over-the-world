@@ -120,7 +120,7 @@ export function drawAirspeed(canvas, kmh, max = 400) {
 }
 
 export function drawAltimeter(canvas, aglM) {
-  arcGauge(canvas, aglM, 1000, "METRY", 200, 100);
+  arcGauge(canvas, aglM, 1000, "METERS", 200, 100);
 }
 
 export function drawCompass(canvas, headingDeg) {

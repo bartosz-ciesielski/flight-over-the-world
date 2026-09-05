@@ -166,7 +166,7 @@ export function joinRoom(hostId, handlers) {
   function tryConnect() {
     if (destroyed || opened) return;
     tries += 1;
-    handlers.onStatus?.(`Łączę z pokojem… (${tries}/${maxTries})`);
+    handlers.onStatus?.(`Joining room… (${tries}/${maxTries})`);
     try {
       if (conn) {
         conn.close();

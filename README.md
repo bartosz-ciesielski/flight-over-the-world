@@ -1,68 +1,68 @@
-# Lot nad światem
+# Flight Over the World
 
-Lot nad fotorealistyczną Ziemią – zgadnij region, doleć do domu albo po prostu lataj. Single player i multiplayer.
+Fly over photorealistic Earth – guess the region, find your way home, or just explore. Single player and multiplayer.
 
-![Lot nad Paryżem](docs/screens/00-paryz.png)
+![Flight over Paris](docs/screens/00-paryz.png)
 
-![Lot nad polami](docs/screens/04-lot.png)
+![Flight over the fields](docs/screens/04-lot.png)
 
-## Ekrany
+## Screens
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/screens/01-start.png" alt="Ekran startowy" /></td>
-    <td width="50%"><img src="docs/screens/02-menu.png" alt="Wybór samolotu i trybu" /></td>
+    <td width="50%"><img src="docs/screens/01-start.png" alt="Start screen" /></td>
+    <td width="50%"><img src="docs/screens/02-menu.png" alt="Plane and mode select" /></td>
   </tr>
   <tr>
-    <td align="center">Start – single albo multiplayer</td>
-    <td align="center">Wybierz samolot, tryb i zakres mapy</td>
+    <td align="center">Start – single or multiplayer</td>
+    <td align="center">Pick a plane, mode, and map range</td>
   </tr>
   <tr>
-    <td><img src="docs/screens/06-ny.png" alt="Lot nad Nowym Jorkiem" /></td>
-    <td><img src="docs/screens/05-pauza.png" alt="Pauza" /></td>
+    <td><img src="docs/screens/06-ny.png" alt="Flight over New York" /></td>
+    <td><img src="docs/screens/05-pauza.png" alt="Paused" /></td>
   </tr>
   <tr>
-    <td align="center">Lataj gdzie chcesz</td>
-    <td align="center">Pauza w locie</td>
+    <td align="center">Fly anywhere</td>
+    <td align="center">Paused in flight</td>
   </tr>
 </table>
 
-## Tryby
+## Modes
 
-- **Zgadnij region** – minuta lotu, potem zaznacz na mapie, gdzie jesteś (Polska / Europa / Świat).
-- **Doleć do domu** – start ~30 km od wpisanego adresu, 10 minut na powrót.
-- **Swobodny lot** – wybierz miasto i lataj.
+- **Guess the region** – one minute of flight, then mark on the map where you are (Poland / Europe / World).
+- **Fly home** – start ~30 km from the address you enter, 10 minutes to get back.
+- **Free flight** – pick a city and fly.
 
-## Sterowanie
+## Controls
 
-| Klawisz | Akcja |
+| Key | Action |
 | --- | --- |
-| `W` `A` `S` `D` | Lot |
-| `Shift` | Nitro |
-| `Ctrl` | Hamulec |
-| `T` | Rozmowa (przytrzymaj) |
-| `Esc` | Pauza |
+| `W` `A` `S` `D` | Fly |
+| `Shift` | Boost |
+| `Ctrl` | Brake |
+| `T` | Talk (hold) |
+| `Esc` | Pause |
 
-## Uruchomienie u siebie
+## Run it locally
 
-Node.js 18+ i darmowy token [Cesium ion](https://ion.cesium.com/).
+Node.js 18+ and a free [Cesium ion](https://ion.cesium.com/) token.
 
 ```bash
-git clone https://github.com/bartosz-ciesielski/lot-nad-swiatem.git
-cd lot-nad-swiatem
+git clone https://github.com/bartosz-ciesielski/flight-over-the-world.git
+cd flight-over-the-world
 npm install
 cp .env.example .env
 ```
 
-1. Załóż konto na [ion.cesium.com](https://ion.cesium.com/).
-2. Utwórz token (Access tokens).
-3. W My Assets dodaj **Google Photorealistic 3D Tiles** (asset `2275207`).
-4. Wklej token do `.env` jako `VITE_CESIUM_ION_KEY=…`
+1. Create an account at [ion.cesium.com](https://ion.cesium.com/).
+2. Create a token (Access tokens).
+3. In My Assets add **Google Photorealistic 3D Tiles** (asset `2275207`).
+4. Put the token in `.env` as `VITE_CESIUM_ION_KEY=…`
 
 ```bash
 npm run dev
 ```
 
-Otwórz adres z terminala (zwykle `http://localhost:5173`). W multiplayer jeden klika Multiplayer, drugi wchodzi w skopiowany link.
+Open the address from the terminal (usually `http://localhost:5173`). In multiplayer one player clicks Multiplayer, the other opens the copied link.
 
-Klucza nie commituj – `.env` jest w `.gitignore`. W menu kafelki się nie ładują, dopiero po starcie lotu.
+Do not commit the key – `.env` is in `.gitignore`. Tiles do not load in the menu, only after you start a flight.

@@ -106,24 +106,24 @@ const GUESS_SCOPES = {
     random: randomPointInPoland,
     draw: drawPolandMap,
     unproject: unprojectPL,
-    sub: "Kliknij punkt na mapie Polski",
-    status: "Losuję punkt w Polsce…",
+    sub: "Click a point on the map of Poland",
+    status: "Picking a point in Poland…",
   },
   eu: {
     load: loadEuropeGeo,
     random: randomPointInEurope,
     draw: drawEuropeMap,
     unproject: unprojectEU,
-    sub: "Kliknij punkt na mapie Europy",
-    status: "Losuję punkt w Europie…",
+    sub: "Click a point on the map of Europe",
+    status: "Picking a point in Europe…",
   },
   world: {
     load: loadWorldGeo,
     random: randomPointInWorld,
     draw: drawWorldMap,
     unproject: unprojectWorld,
-    sub: "Kliknij punkt na mapie świata",
-    status: "Losuję punkt na świecie…",
+    sub: "Click a point on the world map",
+    status: "Picking a point somewhere on Earth…",
   },
 };
 
@@ -143,7 +143,7 @@ const PLANES = {
     cruise: 48, boost: 85, brake: 30,
     cam: [0, 5.5, 15],
     name: "Piper PA-28",
-    desc: "Lekki śmigłowiec – 170 km/h",
+    desc: "Light propeller – 170 km/h",
     sound: "plane",
   },
   q400: {
@@ -152,7 +152,7 @@ const PLANES = {
     cruise: 75, boost: 115, brake: 45,
     cam: [0, 9, 32],
     name: "Dash 8 Q400",
-    desc: "Turbośmigłowy pasażerski – 270 km/h",
+    desc: "Regional turboprop – 270 km/h",
     sound: "plane",
   },
   citation: {
@@ -161,7 +161,7 @@ const PLANES = {
     cruise: 92, boost: 150, brake: 55,
     cam: [0, 7, 24],
     name: "Cessna Citation",
-    desc: "Odrzutowiec biznesowy – 330 km/h",
+    desc: "Business jet – 330 km/h",
     sound: "jet",
   },
   jet: {
@@ -169,8 +169,8 @@ const PLANES = {
     wingspan: 10,
     cruise: 150, boost: 260, brake: 80,
     cam: [0, 6, 19],
-    name: "Myśliwiec",
-    desc: "Odrzutowiec bojowy – 540 km/h",
+    name: "Fighter",
+    desc: "Combat jet – 540 km/h",
     sound: "jet",
     prepare: prepareJet,
   },
@@ -179,8 +179,8 @@ const PLANES = {
     wingspan: 12,
     cruise: 220, boost: 380, brake: 120,
     cam: [0, 6, 20],
-    name: "Rakieta",
-    desc: "Rakieta kosmiczna – 790 km/h",
+    name: "Rocket",
+    desc: "Space rocket – 790 km/h",
     sound: "rocket",
     prepare: prepareRocket,
   },
@@ -231,8 +231,8 @@ const MATE_MARKER_MS = 10000;
 const MATE_INTERP_MS = 130;
 const MATE_SEND_MS = 40;
 const PLAYER_COLORS = ["#7ec8e3", "#e37e7e", "#9dce6a", "#d4a5f5", "#f0c36e", "#6ec8c1"];
-const NAME_ADJ = ["Szybki", "Cichy", "Rudy", "Nocny", "Dziki", "Biały", "Złoty", "Lotny", "Ostry", "Chmurny", "Bystry", "Śmiały"];
-const NAME_NOUN = ["Orzeł", "Sokół", "Wilk", "Lis", "Jastrząb", "Ryś", "Kruk", "Borsuk", "Komar", "Jeleń", "Puma", "Rekin"];
+const NAME_ADJ = ["Swift", "Silent", "Red", "Night", "Wild", "White", "Golden", "Sky", "Sharp", "Storm", "Keen", "Bold"];
+const NAME_NOUN = ["Eagle", "Falcon", "Wolf", "Fox", "Hawk", "Lynx", "Raven", "Badger", "Gnat", "Stag", "Puma", "Shark"];
 
 function randomUsername() {
   const a = NAME_ADJ[Math.floor(Math.random() * NAME_ADJ.length)];
@@ -388,14 +388,14 @@ lobbyCarousel.setActive(false);
 
 // wybór trybu — same przyciski, instrukcja pokazuje się dopiero pod spodem
 const MODE_PLACEHOLDERS = {
-  free: "Miasto startowe… np. Niepruszewo",
-  home: "Twój adres… np. Jarzębinowa 5, Niepruszewo",
+  free: "Starting city… e.g. Paris",
+  home: "Your address… e.g. 5th Avenue, New York",
   guess: "",
 };
 const MODE_DESCS = {
-  free: "Wpisz miasto startowe i zacznij latać bez limitu czasu.",
-  home: "Wyrzucimy Cię ~30 km od domu i masz 10 minut, żeby odszukać drogę i dolecieć z powrotem.",
-  guess: "Masz minutę lotu, aby rozeznać się w terenie i zaznaczyć na mapie, gdzie jesteś.",
+  free: "Pick a starting city and fly with no time limit.",
+  home: "We drop you ~30 km from home. You have 10 minutes to find your way back.",
+  guess: "You have one minute in the air to get your bearings, then mark on the map where you are.",
 };
 function selectMode(m) {
   mode = m;
@@ -486,8 +486,8 @@ function playerColor(id) {
 }
 
 function playerName(id) {
-  if (id === mp.myId) return "Ty";
-  return mp.players.get(id)?.name || "Gracz";
+  if (id === mp.myId) return "You";
+  return mp.players.get(id)?.name || "Player";
 }
 
 function rosterPayload() {
@@ -559,7 +559,7 @@ function renderLobby() {
   ];
   for (const p of otherPlayers()) rows.push(playerRow(p, false));
   if (mp.players.size === 0) {
-    rows.push(`<div class="player-row empty">Czekam na graczy… wyślij link</div>`);
+    rows.push(`<div class="player-row empty">Waiting for players… send the link</div>`);
   }
   el.lobbyPlayers.innerHTML = rows.join("");
   el.lobbyScopes.classList.toggle("locked", !mp.host);
@@ -571,36 +571,36 @@ function renderLobby() {
   const queued = mp.waiting || (mp.roundActive && !mp.inRound);
   el.lobbyStart.disabled = queued;
   el.lobbyStart.textContent = queued
-    ? "Poczekaj na rundę"
+    ? "Wait for next round"
     : mp.myReady
-      ? "Anuluj gotowość"
+      ? "Cancel ready"
       : "Start";
 
   const playable = playablePlayers().length;
   const readyN = (mp.myReady && !mp.waiting ? 1 : 0) + otherPlayers().filter((p) => !p.waiting && p.ready).length;
-  if (queued) setLobbyStatus("Runda w toku — dołączysz w następnej turze");
-  else if (playable < 2) setLobbyStatus("Wyślij link znajomym — wszyscy w pokoju muszą nacisnąć Start");
-  else if (mp.myReady && readyN === playable) setLobbyStatus("Startujemy…");
-  else if (mp.myReady) setLobbyStatus(`Czekam aż wszyscy naciśną Start (${readyN}/${playable})`);
-  else setLobbyStatus(`Wszyscy naciśnijcie Start (${playable} graczy)`);
+  if (queued) setLobbyStatus("Round in progress – you will join the next one");
+  else if (playable < 2) setLobbyStatus("Send the link to friends – everyone in the room must press Start");
+  else if (mp.myReady && readyN === playable) setLobbyStatus("Starting…");
+  else if (mp.myReady) setLobbyStatus(`Waiting for everyone to press Start (${readyN}/${playable})`);
+  else setLobbyStatus(`Everyone press Start (${playable} players)`);
 }
 
 function playerRow(p, isSelf) {
   const plane = PLANES[p.plane]?.name || "";
-  const pts = p.score ? ` · ${p.score} pkt` : "";
-  let badge = "CZEKA";
+  const pts = p.score ? ` · ${p.score} pts` : "";
+  let badge = "WAITING";
   let cls = "";
   if (p.waiting) {
-    badge = "W KOLEJCE";
+    badge = "QUEUED";
     cls = " waiting";
   } else if (p.inRound) {
-    badge = "W GRZE";
+    badge = "IN FLIGHT";
     cls = " ingame";
   } else if (p.ready) {
-    badge = "GOTOWY";
+    badge = "READY";
     cls = " ready";
   }
-  return `<div class="player-row${cls}"><div class="p-meta"><span>${p.name}${isSelf ? " (Ty)" : ""}</span><span class="p-plane">${plane}${pts}</span></div><span class="p-ready">${badge}</span></div>`;
+  return `<div class="player-row${cls}"><div class="p-meta"><span>${p.name}${isSelf ? " (You)" : ""}</span><span class="p-plane">${plane}${pts}</span></div><span class="p-ready">${badge}</span></div>`;
 }
 
 function applyLobbySetup() {
@@ -680,17 +680,17 @@ function updateVoiceUi() {
   box.classList.remove("hidden");
   box.classList.toggle("live", isTalking());
   if (voiceDenied()) {
-    box.textContent = "Mikrofon zablokowany — pozwól na dostęp w przeglądarce";
+    box.textContent = "Microphone blocked – allow access in the browser";
     return;
   }
   if (isTalking()) {
-    box.textContent = "Mówisz…";
+    box.textContent = "Talking…";
     return;
   }
   const who = [...mp.talkers].map((id) => playerName(id)).filter(Boolean);
   box.textContent = who.length
-    ? `${who.join(", ")} mówi…`
-    : "Przytrzymaj T i mów";
+    ? `${who.join(", ")} talking…`
+    : "Hold T to talk";
 }
 
 async function handleVoiceCall(call) {
@@ -855,7 +855,7 @@ function handlePeerLeft(peerId) {
     mp.waiting = false;
     if (!menuOpen) backToLobby();
     else renderLobby();
-    setLobbyStatus("Host wyszedł — pokój się zamknął", true);
+    setLobbyStatus("Host left – the room closed", true);
     return;
   }
   const gone = mp.players.get(peerId);
@@ -869,7 +869,7 @@ function handlePeerLeft(peerId) {
   }
   if (guessOpen) maybeRevealGuesses();
   renderLobby();
-  if (gone) setLobbyStatus(`${gone.name} wyszedł z pokoju`);
+  if (gone) setLobbyStatus(`${gone.name} left the room`);
 }
 
 function handleNetError(err) {
@@ -878,10 +878,10 @@ function handleNetError(err) {
     return;
   }
   const msg = err?.type === "peer-unavailable"
-    ? "Nie znaleziono hosta — niech otworzy Multiplayer i nie odświeża strony, potem wejdź w link jeszcze raz"
+    ? "Host not found – they should open Multiplayer and not refresh, then open the link again"
     : err?.type === "unavailable-id"
-      ? "Ten pokój jest zajęty — dołączam jako gość…"
-      : "Błąd połączenia — sprawdź sieć i wejdź w link ponownie";
+      ? "This room is taken – joining as a guest…"
+      : "Connection error – check your network and open the link again";
   setLobbyStatus(msg, true);
 }
 
@@ -918,7 +918,7 @@ function openHostLobby(existingId) {
   if (existingId) mp.roomId = existingId;
   selectLobbyMode("guess");
   showLobby();
-  setLobbyStatus("Tworzę pokój…");
+  setLobbyStatus("Creating room…");
   const api = hostRoom({
     onOpen(id) {
       mp.roomId = id;
@@ -945,7 +945,7 @@ function openGuestLobby(id) {
   mp.roomId = id;
   showLobby();
   el.lobbyLink.value = roomLink(id);
-  setLobbyStatus("Łączę z pokojem…");
+  setLobbyStatus("Joining room…");
   history.replaceState(null, "", `#r=${id}`);
   const api = joinRoom(id, {
     onStatus(msg) {
@@ -975,7 +975,7 @@ async function launchMpRound() {
   if (mp.launching) return;
   mp.launching = true;
   el.lobbyStart.disabled = true;
-  showMpWait(mode === "guess" ? "Losuję nowy punkt…" : "Przygotowuję lot…");
+  showMpWait(mode === "guess" ? "Picking a new point…" : "Preparing the flight…");
   try {
     if (mode === "guess") {
       const scope = GUESS_SCOPES[guessScope];
@@ -990,16 +990,16 @@ async function launchMpRound() {
       if (!addr) {
         mp.launching = false;
         hideMpWait();
-        setLobbyStatus("Wpisz adres domu", true);
+        setLobbyStatus("Enter your home address", true);
         el.lobbyStart.disabled = false;
         return;
       }
-      setLobbyStatus("Szukam adresu…");
+      setLobbyStatus("Looking up address…");
       const loc = await geocodeCity(addr);
       if (!loc) {
         mp.launching = false;
         hideMpWait();
-        setLobbyStatus("Nie znaleziono takiego adresu", true);
+        setLobbyStatus("Could not find that address", true);
         el.lobbyStart.disabled = false;
         return;
       }
@@ -1017,12 +1017,12 @@ async function launchMpRound() {
       startMpFlight(msg);
     } else {
       const city = el.lobbyCity.value.trim() || "Niepruszewo";
-      setLobbyStatus(`Szukam: ${city}…`);
+      setLobbyStatus(`Looking up: ${city}…`);
       const loc = await geocodeCity(city);
       if (!loc) {
         mp.launching = false;
         hideMpWait();
-        setLobbyStatus(`Nie znaleziono miejscowości „${city}"`, true);
+        setLobbyStatus(`Could not find “${city}”`, true);
         el.lobbyStart.disabled = false;
         return;
       }
@@ -1033,7 +1033,7 @@ async function launchMpRound() {
   } catch {
     mp.launching = false;
     hideMpWait();
-    setLobbyStatus("Błąd — sprawdź sieć i spróbuj ponownie", true);
+    setLobbyStatus("Error – check your network and try again", true);
     el.lobbyStart.disabled = false;
   }
 }
@@ -1156,8 +1156,8 @@ async function startMpFlight(msg) {
   el.lobby.classList.add("hidden");
   hideBanner();
   el.lobbyStart.disabled = false;
-  setLobbyStatus("Ładowanie terenu… czekam na wszystkich");
-  showMpWait("Ładowanie terenu… czekam na wszystkich");
+  setLobbyStatus("Loading terrain… waiting for everyone");
+  showMpWait("Loading terrain… waiting for everyone");
   if (mode === "guess" && !geoCache) {
     GUESS_SCOPES[guessScope].load().then((g) => { geoCache = g; }).catch(() => {});
   }
@@ -1182,8 +1182,8 @@ async function startMpFlight(msg) {
 function reportSnapped() {
   if (!mp.active || !mp.inRound || mp.goSent || mp.waitingGo) return;
   mp.waitingGo = true;
-  setLobbyStatus("Czekam aż wszyscy będą gotowi…");
-  showMpWait("Czekam aż wszyscy będą gotowi…");
+  setLobbyStatus("Waiting until everyone is ready…");
+  showMpWait("Waiting until everyone is ready…");
   const info = {
     h: plane.height,
     gh: groundAlt,
@@ -1313,7 +1313,7 @@ function updateRematchWait() {
   if (!mp.rematch.has(mp.myId)) return;
   const need = rematchNeeded();
   const n = need.filter((id) => mp.rematch.has(id)).length;
-  showMpWait(`Czekam aż wszyscy klikną… ${n}/${need.length || 1}`);
+  showMpWait(`Waiting for everyone to click… ${n}/${need.length || 1}`);
 }
 
 function requestRematch() {
@@ -1381,7 +1381,7 @@ el.lobbyCity.addEventListener("input", () => {
 
 function init() {
   if (!ION_KEY && !API_KEY) {
-    setLoader("Brak klucza mapy — dodaj VITE_CESIUM_ION_KEY do .env", 0);
+    setLoader("Missing map key – add VITE_CESIUM_ION_KEY to .env", 0);
     return;
   }
   setLoader("Start…", 0.4);
@@ -1450,15 +1450,15 @@ function init() {
   tiles.addEventListener("load-error", () => {
     if (!loaderDismissed) {
       loadError = ION_KEY
-        ? "Cesium ion nie odpowiada — sprawdź token VITE_CESIUM_ION_KEY"
-        : "Google zablokowało kafelki 3D dla kont z EEA — dodaj VITE_CESIUM_ION_KEY do .env";
+        ? "Cesium ion is not responding – check VITE_CESIUM_ION_KEY"
+        : "Google blocked 3D tiles for EEA accounts – add VITE_CESIUM_ION_KEY to .env";
     }
   });
   setTimeout(() => {
     if (!loaderDismissed && tiles.group.children.length === 0) {
       loadError = ION_KEY
-        ? "Mapa nie dochodzi… sprawdź token VITE_CESIUM_ION_KEY"
-        : "Google wyłączyło kafelki 3D dla kont z EEA — potrzebny darmowy token Cesium ion (VITE_CESIUM_ION_KEY w .env)";
+        ? "The map is not loading… check VITE_CESIUM_ION_KEY"
+        : "Google disabled 3D tiles for EEA accounts – you need a free Cesium ion token (VITE_CESIUM_ION_KEY in .env)";
     }
   }, 20000);
 
@@ -1690,14 +1690,14 @@ function crash() {
   if (planeMesh) planeMesh.visible = false;
   if (mp.active && mode === "guess") return; // runda trwa — po minucie i tak zgadujecie
   timerActive = false;
-  setTimeout(() => showBanner("ROZBIŁEŚ SIĘ"), 900);
+  setTimeout(() => showBanner("YOU CRASHED"), 900);
 }
 
 async function geocodeCity(name) {
   const url =
     "https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" +
     encodeURIComponent(name);
-  const res = await fetch(url, { headers: { "Accept-Language": "pl" } });
+  const res = await fetch(url, { headers: { "Accept-Language": "en" } });
   if (!res.ok) throw new Error("http " + res.status);
   const data = await res.json();
   if (!data.length) return null;
@@ -1720,16 +1720,16 @@ async function startGame() {
   try {
     if (mode === "free") {
       const city = el.city.value.trim() || "Niepruszewo";
-      el.menuError.textContent = `Szukam: ${city}…`;
+      el.menuError.textContent = `Looking up: ${city}…`;
       const loc = await geocodeCity(city);
-      if (!loc) return menuFail(`Nie znaleziono miejscowości „${city}"`);
+      if (!loc) return menuFail(`Could not find “${city}”`);
       beginFlight(loc.lat, loc.lon);
     } else if (mode === "home") {
       const addr = el.city.value.trim();
-      if (!addr) return menuFail("Wpisz swój adres");
-      el.menuError.textContent = "Szukam adresu…";
+      if (!addr) return menuFail("Enter your address");
+      el.menuError.textContent = "Looking up address…";
       const loc = await geocodeCity(addr);
-      if (!loc) return menuFail("Nie znaleziono takiego adresu");
+      if (!loc) return menuFail("Could not find that address");
       homeTarget = loc;
       const start = offsetPoint(loc.lat, loc.lon, 20 + Math.random() * 10);
       timeLeft = HOME_TIME;
@@ -1746,7 +1746,7 @@ async function startGame() {
       beginFlight(p.lat, p.lon);
     }
   } catch {
-    menuFail("Błąd — sprawdź sieć i spróbuj ponownie");
+    menuFail("Error – check your network and try again");
   }
 }
 
@@ -1765,7 +1765,7 @@ function beginFlight(lat, lon) {
   // a samolot nie jest szarpany dosadzeniem w trakcie sterowania
   awaitingSnap = true;
   awaitingSnapSince = performance.now();
-  el.menuError.textContent = "Ładowanie terenu…";
+  el.menuError.textContent = "Loading terrain…";
 }
 
 // wywoływane gdy teren zmierzony — właściwy start gry
@@ -1813,8 +1813,8 @@ el.lobbyCopy.addEventListener("click", async () => {
   if (!link) return;
   try {
     await navigator.clipboard.writeText(link);
-    el.lobbyCopy.textContent = "Skopiowano";
-    setTimeout(() => { el.lobbyCopy.textContent = "Kopiuj link"; }, 1600);
+    el.lobbyCopy.textContent = "Copied";
+    setTimeout(() => { el.lobbyCopy.textContent = "Copy link"; }, 1600);
   } catch {
     el.lobbyLink.select();
   }
@@ -1822,11 +1822,11 @@ el.lobbyCopy.addEventListener("click", async () => {
 el.lobbyStart.addEventListener("click", () => {
   unlockAudio();
   if (mp.waiting || (mp.roundActive && !mp.inRound)) {
-    setLobbyStatus("Runda w toku — dołączysz w następnej turze");
+    setLobbyStatus("Round in progress – you will join the next one");
     return;
   }
   if (playablePlayers().length < 2) {
-    setLobbyStatus("Najpierw poczekaj, aż ktoś wejdzie z linku", true);
+    setLobbyStatus("Wait until someone joins from the link first", true);
     return;
   }
   mp.myReady = !mp.myReady;
@@ -1884,10 +1884,10 @@ function openGuessMap() {
   updateGuessScores();
   el.gmClose.style.display = "none";
   el.gmRetry.style.display = "none";
-  el.gmClose.textContent = mp.active ? "Wróć do pokoju" : "Wróć do menu";
-  el.gmRetry.textContent = mp.active ? "Jeszcze jedna runda" : "Spróbuj ponownie";
+  el.gmClose.textContent = mp.active ? "Back to room" : "Back to menu";
+  el.gmRetry.textContent = mp.active ? "Another round" : "Try again";
   el.gmSub.textContent = mp.active
-    ? "Kliknij, gdzie was wyrzucono — kto bliżej, wygrywa"
+    ? "Click where you were dropped – closest guess wins"
     : GUESS_SCOPES[guessScope].sub;
   el.guessmap.classList.add("show");
   requestAnimationFrame(() => drawGuessMap());
@@ -1897,7 +1897,7 @@ function maybeRevealGuesses() {
   const need = inRoundPlayers().length;
   if (!need || mp.guesses.size < need) {
     if (guessOpen) {
-      el.gmResult.textContent = `Czekam na zaznaczenia… ${mp.guesses.size}/${need}`;
+      el.gmResult.textContent = `Waiting for guesses… ${mp.guesses.size}/${need}`;
     }
     return;
   }
@@ -1909,7 +1909,7 @@ function revealMpGuesses() {
   if (mp.guesses.size < inRoundPlayers().length) return;
   guessAnswered = true;
   const marks = [
-    { lat: mp.truth.lat, lon: mp.truth.lon, color: "#d8a24a", label: "Tu byliście", truth: true },
+    { lat: mp.truth.lat, lon: mp.truth.lon, color: "#d8a24a", label: "You were here", truth: true },
   ];
   const results = [];
   for (const [id, g] of mp.guesses) {
@@ -1929,10 +1929,10 @@ function revealMpGuesses() {
   const line = results.map((r) => `${r.name} ${Math.round(r.err)} km`).join(" · ");
   el.gmResult.textContent =
     winners.length > 1
-      ? `Remis — ${line}`
+      ? `Tie – ${line}`
       : winners[0]?.id === mp.myId
-        ? `Wygrywasz — ${line}`
-        : `Wygrywa ${winners[0]?.name} — ${line}`;
+        ? `You win – ${line}`
+        : `${winners[0]?.name} wins – ${line}`;
   updateGuessScores();
   el.gmClose.style.display = "";
   el.gmRetry.style.display = "";
@@ -1946,7 +1946,7 @@ function updateGuessScores() {
     el.gmScoreRight.textContent = "";
     return;
   }
-  el.gmScoreLeft.textContent = `Ty ${mp.myScore}`;
+  el.gmScoreLeft.textContent = `You ${mp.myScore}`;
   el.gmScoreRight.textContent = otherPlayers()
     .map((p) => `${p.name} ${p.score ?? 0}`)
     .join("  ");
@@ -1978,10 +1978,10 @@ el.gmCanvas.addEventListener("click", (e) => {
   const errKm = distanceM(lat, lon, plane.latDeg, plane.lonDeg) / 1000;
   guessAnswered = true;
   drawGuessMap([
-    { lat: plane.latDeg, lon: plane.lonDeg, color: "#d8a24a", label: "Tu byłeś", truth: true },
-    { lat, lon, color: "#f3ead6", label: "Twój strzał" },
+    { lat: plane.latDeg, lon: plane.lonDeg, color: "#d8a24a", label: "You were here", truth: true },
+    { lat, lon, color: "#f3ead6", label: "Your guess" },
   ]);
-  el.gmResult.textContent = `Różnica: ${Math.round(errKm)} km`;
+  el.gmResult.textContent = `Off by ${Math.round(errKm)} km`;
   el.gmClose.style.display = "";
   el.gmRetry.style.display = "";
 });
@@ -2009,7 +2009,7 @@ el.gmRetry.addEventListener("click", () => {
     requestRematch();
     return;
   }
-  el.gmResult.textContent = "Losuję nowy punkt…";
+  el.gmResult.textContent = "Picking a new point…";
   el.gmRetry.style.display = "none";
   el.gmClose.style.display = "none";
   restartMode();
@@ -2310,7 +2310,7 @@ function animate() {
       timerActive = false;
       if (mode === "home") {
         finished = true;
-        showBanner("CZAS MINĄŁ");
+        showBanner("TIME'S UP");
       } else if (mode === "guess") {
         openGuessMap();
       }
@@ -2322,7 +2322,7 @@ function animate() {
       finished = true;
       timerActive = false;
       beacon.visible = false;
-      showBanner("DOTARŁEŚ DO DOMU!");
+      showBanner("YOU MADE IT HOME!");
     }
   }
 
