@@ -9,7 +9,7 @@ const COOL_MS = 90 * 1000;
 export const TILE_QUALITY = {
   // Lower = refine sooner / sharper. Light falloff keeps only the far
   // haze coarse so trees and buildings start loading a few km out.
-  errorTarget: 3,
+  errorTarget: 2,
   errorFalloff: 0,
   errorFalloffDensity: 1e-4,
   maxJobs: 16,

@@ -3118,27 +3118,27 @@ const camPos = new Vector3();
 const camTarget = new Vector3();
 const planePos = new Vector3();
 const planeQuat = new Quaternion();
-const lookPos = new Vector3();
-const lookQuat = new Quaternion();
-const lookScale = new Vector3();
-const EARTH_R = 6378137;
+const lookFwd = new Vector3();
 
 function updateLookaheadCamera() {
-  if (!lookCam || !plane || !tiles) return;
-  const aheadM = Math.min(7500, 2800 + plane.speed * 16);
-  const cosLat = Math.max(0.2, Math.cos(plane.lat));
-  const lat = plane.lat + (aheadM * Math.cos(plane.heading)) / EARTH_R;
-  const lon = plane.lon + (aheadM * Math.sin(plane.heading)) / (EARTH_R * cosLat);
-  const m = frameAt(lat, lon, plane.height + 140, plane.heading, -0.58, 0);
-  m.decompose(lookPos, lookQuat, lookScale);
-  lookCam.position.copy(lookPos);
-  lookCam.quaternion.copy(lookQuat);
+  if (!lookCam || !plane || !tiles || !camera) return;
+  // Same view as the player, slid forward so the strip about to fill
+  // the screen is treated as "close" and downloads now.
+  const aheadM = Math.min(2200, 1100 + plane.speed * 8);
+  lookCam.fov = camera.fov;
   lookCam.aspect = camera.aspect;
-  lookCam.fov = 72;
+  lookCam.near = camera.near;
+  lookCam.far = camera.far;
+  lookCam.position.copy(camera.position);
+  lookCam.quaternion.copy(camera.quaternion);
+  lookFwd.set(0, 0, -1).applyQuaternion(camera.quaternion);
+  lookCam.position.addScaledVector(lookFwd, aheadM);
   lookCam.updateProjectionMatrix();
   lookCam.updateMatrixWorld(true);
   tiles.setCamera(lookCam);
-  tiles.setResolutionFromRenderer(lookCam, renderer);
+  const w = renderer.domElement.width || innerWidth;
+  const h = renderer.domElement.height || innerHeight;
+  tiles.setResolution(lookCam, w * 0.55, h * 0.55);
 }
 const offset = new Vector3();
 const camFramePos = new Vector3();
@@ -3518,6 +3518,8 @@ function tickFrame() {
     ctxLost: !!window.__ctxLost,
     loading: tiles.isLoading,
     visibleTiles: tiles.visibleTiles?.size ?? -1,
+    tileCams: tiles.cameras?.length ?? 0,
+    lookDist: lookCam ? Math.round(lookCam.position.distanceTo(planePos)) : -1,
     tileFailed: tiles.stats?.failed ?? -1,
     tileQueued: tiles.stats?.queued ?? -1,
     tileDown: tiles.stats?.downloading ?? -1,
