@@ -205,16 +205,13 @@ const TILE_ERROR_TARGET = 10;
 function holdLoadedTiles() {
   if (!tiles) return;
   tileHoldUntil = performance.now() + 12000;
-  tiles.resetFailedTiles();
   tiles.downloadQueue.maxJobsPerOrigin = 0;
-  tiles.group.visible = !menuOpen;
 }
 
 function releaseTileHold() {
   if (!tiles || !tileHoldUntil) return;
   if (performance.now() >= tileHoldUntil) {
     tileHoldUntil = 0;
-    tiles.errorTarget = TILE_ERROR_TARGET;
     tiles.downloadQueue.maxJobsPerOrigin = 25;
   }
 }
@@ -1792,7 +1789,7 @@ function init() {
   scene.fog = new FogExp2(0x9dd0ea, 0.00007);
 
   renderer = new WebGLRenderer({
-    antialias: !isMobile,
+    antialias: true,
     powerPreference: "high-performance",
     alpha: false,
   });
@@ -1865,8 +1862,8 @@ function init() {
   tiles.setResolutionFromRenderer(camera, renderer);
   tiles.setCamera(camera);
   tiles.errorTarget = TILE_ERROR_TARGET;
-  tiles.lruCache.maxSize = isMobile ? 2200 : 3000;
-  tiles.lruCache.maxBytesSize = isMobile ? 4.5e8 : 1.5e9;
+  tiles.lruCache.maxSize = 3000;
+  tiles.lruCache.maxBytesSize = 1.5e9;
   tiles.addEventListener("load-tileset", () => {
     tiles.errorTarget = TILE_ERROR_TARGET;
   });
