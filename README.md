@@ -1,4 +1,4 @@
-# Flight Over the World
+# Flight Over the Earth
 
 Fly over photorealistic Earth – guess the region, find your way home, or just explore. Single player and multiplayer.
 
