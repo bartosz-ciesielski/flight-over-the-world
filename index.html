@@ -151,8 +151,8 @@
           <button id="start-btn" type="button">Start</button>
         </div>
         <p id="menu-error"></p>
-          <p class="hint hint-desk"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> fly · hold <kbd>Shift</kbd> to speed up · hold <kbd>Ctrl</kbd> to slow down · <kbd>Esc</kbd> pause</p>
-          <p class="hint hint-touch">Drag the stick to fly · hold Faster / Slower</p>
+          <p class="hint hint-desk"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> fly · hold <kbd>Shift</kbd> to speed up · hold <kbd>Ctrl</kbd> to slow down · <kbd>M</kbd> map · <kbd>Esc</kbd> pause</p>
+          <p class="hint hint-touch">Drag the stick to fly · hold Faster / Slower · Map shows where you are</p>
       </div>
     </div>
 
@@ -170,6 +170,18 @@
       <div class="mp-wait-card">
         <div class="spin" aria-hidden="true"></div>
         <p id="mp-wait-text">Waiting for players…</p>
+      </div>
+    </div>
+
+    <div id="freemap">
+      <div class="fm-card">
+        <div class="fm-head">
+          <span class="fm-kicker">You are here</span>
+          <h2 id="fm-place">–</h2>
+          <button id="fm-close" type="button">Close</button>
+        </div>
+        <canvas id="fm-canvas" width="720" height="480"></canvas>
+        <p class="fm-credit">M to close · © OpenStreetMap</p>
       </div>
     </div>
 
@@ -240,6 +252,7 @@
         <div id="stick-knob"></div>
       </div>
       <div class="touch-btns">
+        <button id="touch-map" type="button">Map</button>
         <button id="touch-boost" type="button">Faster</button>
         <button id="touch-brake" type="button">Slower</button>
         <button id="touch-talk" type="button">Talk</button>

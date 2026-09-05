@@ -1582,6 +1582,93 @@ kbd {
 
 #touch-talk { display: none; }
 #touch.talk #touch-talk { display: block; }
+#touch-map { display: none; }
+#touch.free #touch-map { display: block; }
+
+#freemap {
+  position: fixed;
+  inset: 0;
+  z-index: 8;
+  display: grid;
+  place-items: center;
+  background: rgba(10, 14, 10, 0.55);
+  backdrop-filter: blur(6px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+
+#freemap.show {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.fm-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: min(760px, 92vw);
+  padding: 18px 18px 12px;
+  background: rgba(18, 14, 10, 0.88);
+  border: 1px solid rgba(243, 234, 214, 0.16);
+  border-radius: 10px;
+  backdrop-filter: blur(14px);
+}
+
+.fm-head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  align-items: center;
+  gap: 2px 16px;
+  margin-bottom: 12px;
+}
+
+.fm-kicker {
+  grid-column: 1;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.fm-head h2 {
+  grid-column: 1;
+  margin: 0;
+  font-size: 26px;
+}
+
+#fm-close {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  padding: 8px 14px;
+  background: transparent;
+  border: 1px solid rgba(243, 234, 214, 0.28);
+  border-radius: 8px;
+  color: var(--paper);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+#fm-close:hover { background: rgba(243, 234, 214, 0.08); }
+
+#fm-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 720 / 480;
+  border-radius: 8px;
+  background: #c9d4c0;
+}
+
+.fm-credit {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+}
 
 @media (hover: none), (pointer: coarse), (max-width: 720px) {
   .hint-desk { display: none; }

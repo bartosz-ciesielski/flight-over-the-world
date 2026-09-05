@@ -56,6 +56,7 @@ import {
   applyTileQuality,
 } from "./game/tileAuth.js";
 import { createHoldParentTilesPlugin } from "./game/holdParentTiles.js";
+import { createFreeMap } from "./game/freeMap.js";
 
 // rakieta stoi pionowo (+Y) — połóż ją nosem do przodu (-Z, konwencja lotu)
 function prepareRocket(model) {
@@ -626,6 +627,11 @@ const el = {
   touchBoost: document.getElementById("touch-boost"),
   touchBrake: document.getElementById("touch-brake"),
   touchTalk: document.getElementById("touch-talk"),
+  touchMap: document.getElementById("touch-map"),
+  freemap: document.getElementById("freemap"),
+  fmCanvas: document.getElementById("fm-canvas"),
+  fmPlace: document.getElementById("fm-place"),
+  fmClose: document.getElementById("fm-close"),
   lobbyCarCanvas: document.getElementById("lobby-carousel-canvas"),
   lobbyCarPrev: document.getElementById("lobby-car-prev"),
   lobbyCarNext: document.getElementById("lobby-car-next"),
@@ -636,6 +642,31 @@ const el = {
   fatalOk: document.getElementById("fatal-ok"),
   crashNote: document.getElementById("crash-note"),
 };
+
+const freeMap = createFreeMap({
+  root: el.freemap,
+  canvas: el.fmCanvas,
+  place: el.fmPlace,
+  close: el.fmClose,
+});
+
+function canOpenFreeMap() {
+  return mode === "free" && !menuOpen && !paused && !guessOpen && !crashed && !finished;
+}
+
+function toggleFreeMap() {
+  if (!canOpenFreeMap() && !freeMap.open) return;
+  if (freeMap.open) freeMap.hide();
+  else if (canOpenFreeMap()) {
+    freeMap.update(
+      plane.latDeg,
+      plane.lonDeg,
+      plane.headingDeg,
+      el.place?.textContent || ""
+    );
+    freeMap.show();
+  }
+}
 
 // karuzela pojazdów — jeden duży podgląd, strzałki w bok
 const planePreviewItems = PLANE_ORDER.map((k) => ({
@@ -2677,6 +2708,7 @@ function setPaused(v) {
   leaveOpen = false;
   paused = v;
   keys.clear();
+  if (v) freeMap.hide();
   syncPauseCopy();
   el.pause.classList.toggle("show", v);
 }
@@ -2702,6 +2734,7 @@ function backToMenu() {
   guessOpen = false;
   awaitingSnap = false;
   beacon.visible = false;
+  freeMap.hide();
   el.guessmap.classList.remove("show");
   hidePlaceBadge();
   el.start.disabled = false;
@@ -2922,6 +2955,10 @@ window.addEventListener("keydown", (e) => {
   }
   if (e.key === "Escape") {
     if (menuOpen) return;
+    if (freeMap.open) {
+      freeMap.hide();
+      return;
+    }
     if (mp.active) {
       setLeaveOpen(!leaveOpen);
       return;
@@ -2933,6 +2970,11 @@ window.addEventListener("keydown", (e) => {
   const k = e.key.toLowerCase();
   if (k === "t" && voiceEnabled()) {
     if (!e.repeat) startTalk();
+    return;
+  }
+  if (k === "m" && !e.repeat && mode === "free" && !menuOpen && !guessOpen) {
+    e.preventDefault();
+    toggleFreeMap();
     return;
   }
   if (menuOpen || paused || guessOpen) return;
@@ -3022,6 +3064,7 @@ bindHold(el.touchBoost, () => { touch.boost = true; }, () => { touch.boost = fal
 bindHold(el.touchBrake, () => { touch.brake = true; }, () => { touch.brake = false; });
 bindHold(el.touchTalk, () => startTalk(), () => stopTalk());
 el.touchPause?.addEventListener("click", () => setPaused(true));
+el.touchMap?.addEventListener("click", () => toggleFreeMap());
 el.stick?.addEventListener("touchmove", (e) => e.preventDefault(), { passive: false });
 
 function syncTouchUi() {
@@ -3030,6 +3073,7 @@ function syncTouchUi() {
   el.touch.classList.toggle("hidden", !show);
   el.touch.classList.toggle("show", show);
   el.touch.classList.toggle("talk", voiceEnabled());
+  el.touch.classList.toggle("free", mode === "free");
   if (!show) {
     resetStick();
     touch.boost = false;
@@ -3385,6 +3429,17 @@ function tickFrame() {
   if (frameCount % 2 === 0) updateHud(agl);
   if (frameCount % 4 === 0) syncTouchUi();
   if (mode === "free" && !menuOpen && frameCount % 90 === 0) syncPlaceBadge();
+  if (freeMap.open) {
+    if (!canOpenFreeMap()) freeMap.hide();
+    else if (frameCount % 2 === 0) {
+      freeMap.update(
+        plane.latDeg,
+        plane.lonDeg,
+        plane.headingDeg,
+        el.place?.textContent || ""
+      );
+    }
+  }
 
   if (menuOpen) {
     tiles.group.visible = false;
