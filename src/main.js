@@ -204,7 +204,7 @@ const RESULTS_TIME = 10;
 const HOME_CAPTURE_M = 600;
 const HOME_BEACON_M = 1000;
 
-let camera, scene, renderer, tiles, sun, sky;
+let camera, lookCam, scene, renderer, tiles, sun, sky;
 let tileHoldUntil = 0;
 let tile429Count = 0;
 let lastFailedRetryAt = 0;
@@ -2064,6 +2064,7 @@ async function init() {
   scene.add(sun.target);
 
   camera = new PerspectiveCamera(70, innerWidth / innerHeight, 0.5, 1e8);
+  lookCam = new PerspectiveCamera(72, innerWidth / innerHeight, 0.5, 1e8);
 
   tiles = new TilesRenderer();
   tiles.registerPlugin({
@@ -2127,6 +2128,8 @@ async function init() {
   scene.add(tiles.group);
   tiles.setResolutionFromRenderer(camera, renderer);
   tiles.setCamera(camera);
+  tiles.setCamera(lookCam);
+  tiles.setResolutionFromRenderer(lookCam, renderer);
   applyTileQuality(tiles);
   tiles.addEventListener("load-tileset", () => {
     applyTileQuality(tiles);
@@ -2343,6 +2346,10 @@ function onResize() {
   if (!camera || !renderer) return;
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
+  if (lookCam) {
+    lookCam.aspect = camera.aspect;
+    lookCam.updateProjectionMatrix();
+  }
   applyPixelRatio();
   renderer.setSize(innerWidth, innerHeight);
 }
@@ -3111,6 +3118,28 @@ const camPos = new Vector3();
 const camTarget = new Vector3();
 const planePos = new Vector3();
 const planeQuat = new Quaternion();
+const lookPos = new Vector3();
+const lookQuat = new Quaternion();
+const lookScale = new Vector3();
+const EARTH_R = 6378137;
+
+function updateLookaheadCamera() {
+  if (!lookCam || !plane || !tiles) return;
+  const aheadM = Math.min(7500, 2800 + plane.speed * 16);
+  const cosLat = Math.max(0.2, Math.cos(plane.lat));
+  const lat = plane.lat + (aheadM * Math.cos(plane.heading)) / EARTH_R;
+  const lon = plane.lon + (aheadM * Math.sin(plane.heading)) / (EARTH_R * cosLat);
+  const m = frameAt(lat, lon, plane.height + 140, plane.heading, -0.58, 0);
+  m.decompose(lookPos, lookQuat, lookScale);
+  lookCam.position.copy(lookPos);
+  lookCam.quaternion.copy(lookQuat);
+  lookCam.aspect = camera.aspect;
+  lookCam.fov = 72;
+  lookCam.updateProjectionMatrix();
+  lookCam.updateMatrixWorld(true);
+  tiles.setCamera(lookCam);
+  tiles.setResolutionFromRenderer(lookCam, renderer);
+}
 const offset = new Vector3();
 const camFramePos = new Vector3();
 const camFrameQuat = new Quaternion();
@@ -3458,6 +3487,7 @@ function tickFrame() {
     tiles.setResolutionFromRenderer(camera, renderer);
     tiles.setCamera(camera);
     camera.updateMatrixWorld();
+    if (!crashed && !finished) updateLookaheadCamera();
     releaseTileHold();
     retryFailedTiles();
     updateTilesSafe();
