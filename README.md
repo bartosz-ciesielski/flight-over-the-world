@@ -68,3 +68,7 @@ npm run dev
 Open the address from the terminal (usually `http://localhost:5173`). In multiplayer one player clicks Multiplayer, the other opens the copied link.
 
 Do not commit the key – `.env` is in `.gitignore`. Tiles do not load in the menu, only after you start a flight.
+
+## License
+
+[MIT](LICENSE) – free to use, copy, and modify.

@@ -1,6 +1,7 @@
 {
   "name": "flight-over-the-world",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite",
