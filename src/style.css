@@ -448,6 +448,7 @@ kbd {
 }
 
 #landing,
+#nick,
 #rooms,
 #lobby {
   position: fixed;
@@ -467,6 +468,7 @@ kbd {
 }
 
 #landing.hidden,
+#nick.hidden,
 #rooms.hidden,
 #lobby.hidden {
   opacity: 0;
@@ -1117,6 +1119,43 @@ kbd {
 
 #city-input:focus { border-color: var(--gold); }
 
+#nick-input {
+  width: 100%;
+  padding: 14px 16px;
+  margin: 0 0 14px;
+  background: rgba(243, 234, 214, 0.07);
+  border: 1px solid rgba(243, 234, 214, 0.2);
+  border-radius: 6px;
+  color: var(--paper);
+  font-family: inherit;
+  font-size: 16px;
+  outline: none;
+}
+
+#nick-input:focus { border-color: var(--gold); }
+
+#nick-error {
+  min-height: 18px;
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: #ff9d7a;
+}
+
+#nick-go {
+  width: 100%;
+  padding: 16px 22px;
+  background: var(--gold);
+  border: none;
+  border-radius: 8px;
+  color: #1c1710;
+  font-family: inherit;
+  font-size: 18px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.nick-card { position: relative; }
+
 #start-btn {
   padding: 13px 34px;
   background: var(--gold);
@@ -1521,6 +1560,7 @@ kbd {
 @media (max-width: 720px), (max-height: 820px) {
   #menu,
   #landing,
+  #nick,
   #rooms,
   #lobby,
   #guessmap {

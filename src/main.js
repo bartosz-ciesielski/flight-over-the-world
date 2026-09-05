@@ -280,6 +280,29 @@ function randomUsername() {
   return `${a} ${n}`;
 }
 
+const NICK_KEY = "foe-nick";
+let pendingJoinId = "";
+
+function savedNick() {
+  try {
+    return String(localStorage.getItem(NICK_KEY) || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+function storeNick(name) {
+  try {
+    localStorage.setItem(NICK_KEY, name);
+  } catch {
+    /* ignore */
+  }
+}
+
+function normalizeNick(raw) {
+  return String(raw || "").replace(/\s+/g, " ").trim().slice(0, 20);
+}
+
 function uniquePlayerName(base) {
   const taken = new Set([mp.myName, ...[...mp.players.values()].map((p) => p.name)].filter(Boolean));
   if (base && !taken.has(base)) return base;
@@ -369,6 +392,12 @@ const el = {
   mpWaitText: document.getElementById("mp-wait-text"),
   guessScope: document.getElementById("guess-scope"),
   landing: document.getElementById("landing"),
+  nick: document.getElementById("nick"),
+  nickInput: document.getElementById("nick-input"),
+  nickError: document.getElementById("nick-error"),
+  nickSub: document.getElementById("nick-sub"),
+  nickBack: document.getElementById("nick-back"),
+  nickGo: document.getElementById("nick-go"),
   rooms: document.getElementById("rooms"),
   roomsList: document.getElementById("rooms-list"),
   roomsStatus: document.getElementById("rooms-status"),
@@ -659,6 +688,46 @@ function escapeHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
+function showNick(opts = {}) {
+  pendingJoinId = opts.roomId || "";
+  menuOpen = true;
+  el.landing.classList.add("hidden");
+  el.menu.classList.add("hidden");
+  el.lobby.classList.add("hidden");
+  el.rooms?.classList.add("hidden");
+  el.nick.classList.remove("hidden");
+  if (el.nickSub) {
+    el.nickSub.textContent = pendingJoinId ? "Choose a nickname to join" : "Choose a nickname";
+  }
+  if (el.nickInput) {
+    el.nickInput.value = normalizeNick(el.nickInput.value) || savedNick();
+    queueMicrotask(() => {
+      el.nickInput.focus();
+      el.nickInput.select();
+    });
+  }
+  if (el.nickError) el.nickError.textContent = "";
+}
+
+function submitNick() {
+  const name = normalizeNick(el.nickInput?.value);
+  if (name.length < 2) {
+    if (el.nickError) el.nickError.textContent = "Enter at least 2 characters";
+    el.nickInput?.focus();
+    return;
+  }
+  mp.myName = name;
+  storeNick(name);
+  const joinId = pendingJoinId;
+  pendingJoinId = "";
+  if (joinId) {
+    if (wasHosting(joinId)) openHostLobby(joinId);
+    else openGuestLobby(joinId);
+    return;
+  }
+  showRooms();
+}
+
 function showLanding() {
   hostGen += 1;
   closeRoom();
@@ -669,6 +738,8 @@ function showLanding() {
   el.menu.classList.add("hidden");
   el.lobby.classList.add("hidden");
   el.rooms?.classList.add("hidden");
+  el.nick?.classList.add("hidden");
+  pendingJoinId = "";
   carousel.setActive(false);
   lobbyCarousel.setActive(false);
   rememberHost("");
@@ -683,6 +754,7 @@ function showRooms() {
   el.landing.classList.add("hidden");
   el.menu.classList.add("hidden");
   el.lobby.classList.add("hidden");
+  el.nick?.classList.add("hidden");
   el.rooms.classList.remove("hidden");
   carousel.setActive(false);
   lobbyCarousel.setActive(false);
@@ -699,6 +771,7 @@ function showSoloMenu() {
   el.landing.classList.add("hidden");
   el.lobby.classList.add("hidden");
   el.rooms?.classList.add("hidden");
+  el.nick?.classList.add("hidden");
   el.menu.classList.remove("hidden");
   carousel.setActive(true);
   lobbyCarousel.setActive(false);
@@ -709,6 +782,7 @@ function showLobby() {
   el.landing.classList.add("hidden");
   el.menu.classList.add("hidden");
   el.rooms?.classList.add("hidden");
+  el.nick?.classList.add("hidden");
   el.lobby.classList.remove("hidden");
   carousel.setActive(false);
   ensureLobbyCarousel();
@@ -1248,7 +1322,7 @@ function openHostLobby(existingId, opts = {}) {
   closeRoom();
   mp.active = true;
   mp.host = true;
-  mp.myName = "Host";
+  mp.myName = normalizeNick(mp.myName) || savedNick() || "Host";
   mp.visibility = opts.visibility === "private" ? "private" : "public";
   syncRoomTitle();
   if (existingId) mp.roomId = existingId;
@@ -1286,7 +1360,7 @@ function openGuestLobby(id) {
   closeRoom();
   mp.active = true;
   mp.host = false;
-  mp.myName = randomUsername();
+  mp.myName = normalizeNick(mp.myName) || savedNick() || randomUsername();
   mp.roomId = id;
   showLobby();
   el.lobbyLink.value = roomLink(id);
@@ -2200,7 +2274,18 @@ el.btnSolo.addEventListener("click", () => {
 });
 el.btnMulti.addEventListener("click", () => {
   unlockAudio();
-  showRooms();
+  showNick();
+});
+el.nickBack?.addEventListener("click", () => showLanding());
+el.nickGo?.addEventListener("click", () => {
+  unlockAudio();
+  submitNick();
+});
+el.nickInput?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    unlockAudio();
+    submitNick();
+  }
 });
 el.roomsBack?.addEventListener("click", () => showLanding());
 el.btnCreateRoom?.addEventListener("click", () => {
@@ -2250,10 +2335,7 @@ el.lobbyStart.addEventListener("click", () => {
 });
 
 const joinId = parseRoomFromUrl();
-if (joinId) {
-  if (wasHosting(joinId)) openHostLobby(joinId);
-  else openGuestLobby(joinId);
-}
+if (joinId) showNick({ roomId: joinId });
 
 function syncPauseCopy() {
   if (mp.active) {
