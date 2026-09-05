@@ -237,18 +237,17 @@ const NAME_NOUN = ["Orzeł", "Sokół", "Wilk", "Lis", "Jastrząb", "Ryś", "Kru
 function randomUsername() {
   const a = NAME_ADJ[Math.floor(Math.random() * NAME_ADJ.length)];
   const n = NAME_NOUN[Math.floor(Math.random() * NAME_NOUN.length)];
-  const num = Math.floor(Math.random() * 90) + 10;
-  return `${a} ${n} ${num}`;
+  return `${a} ${n}`;
 }
 
 function uniquePlayerName(base) {
   const taken = new Set([mp.myName, ...[...mp.players.values()].map((p) => p.name)].filter(Boolean));
   if (base && !taken.has(base)) return base;
-  for (let i = 0; i < 20; i++) {
+  for (let i = 0; i < 40; i++) {
     const next = randomUsername();
     if (!taken.has(next)) return next;
   }
-  return `${base || randomUsername()} ${Math.floor(Math.random() * 90) + 10}`;
+  return base || randomUsername();
 }
 
 const mp = {
