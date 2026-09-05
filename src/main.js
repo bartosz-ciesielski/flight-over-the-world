@@ -93,7 +93,7 @@ import {
   wasHosting,
   rememberHost,
 } from "./game/net.js";
-import { connectDirectory, parseJoinCode, startAnnouncer } from "./game/directory.js";
+import { connectDirectory, startAnnouncer } from "./game/directory.js";
 import {
   bindVoice,
   ensureMic,
@@ -370,11 +370,8 @@ const el = {
   roomsList: document.getElementById("rooms-list"),
   roomsStatus: document.getElementById("rooms-status"),
   roomsBack: document.getElementById("rooms-back"),
-  roomTitle: document.getElementById("room-title"),
-  roomCode: document.getElementById("room-code"),
-  btnCreatePublic: document.getElementById("btn-create-public"),
-  btnCreatePrivate: document.getElementById("btn-create-private"),
-  btnJoinCode: document.getElementById("btn-join-code"),
+  roomVis: document.getElementById("room-vis"),
+  btnCreateRoom: document.getElementById("btn-create-room"),
   lobby: document.getElementById("lobby"),
   lobbyTitle: document.getElementById("lobby-title"),
   lobbyVis: document.getElementById("lobby-vis"),
@@ -551,6 +548,7 @@ showCrashHints();
 let directory = null;
 let publicRooms = [];
 let announcer = null;
+let roomsLooking = false;
 
 function setRoomsStatus(msg, isErr = false) {
   if (!el.roomsStatus) return;
@@ -565,10 +563,18 @@ function scopeLabel(scope = guessScope) {
   return "World";
 }
 
+function roomTitleFromParams(visibility = mp.visibility, scope = guessScope) {
+  return `${visibility === "private" ? "Private" : "Public"} · ${scopeLabel(scope)}`;
+}
+
+function syncRoomTitle() {
+  mp.roomTitle = roomTitleFromParams();
+}
+
 function publicRoomInfo() {
   return {
     id: mp.roomId,
-    title: mp.roomTitle || (mp.visibility === "private" ? "Private room" : "Public room"),
+    title: roomTitleFromParams(),
     count: 1 + mp.players.size,
     scope: guessScope,
     scopeLabel: scopeLabel(guessScope),
@@ -591,8 +597,10 @@ function stopPublishing() {
 
 function ensureDirectory() {
   if (directory) return directory;
-  setRoomsStatus("Looking for public rooms…");
+  roomsLooking = true;
+  renderRoomList();
   directory = connectDirectory((rooms) => {
+    roomsLooking = false;
     publicRooms = rooms.filter((r) => r.id && r.visibility !== "private");
     renderRoomList();
   });
@@ -610,7 +618,8 @@ function renderRoomList() {
   if (!el.roomsList) return;
   const live = publicRooms.filter((r) => r.id !== mp.roomId);
   if (!live.length) {
-    el.roomsList.innerHTML = `<div class="room-row empty">No public rooms yet — create one</div>`;
+    const msg = roomsLooking ? "Looking for public rooms…" : "No public rooms yet — create one";
+    el.roomsList.innerHTML = `<div class="room-row empty">${msg}</div>`;
     return;
   }
   el.roomsList.innerHTML = live.map((r) => {
@@ -810,7 +819,7 @@ function renderLobby() {
     el.lobbyCity.readOnly = true;
   }
   if (mp.roomId) el.lobbyLink.value = roomLink(mp.roomId);
-  if (el.lobbyTitle) el.lobbyTitle.textContent = mp.roomTitle || (mp.visibility === "private" ? "Private room" : "Public room");
+  if (el.lobbyTitle) el.lobbyTitle.textContent = roomTitleFromParams();
   if (el.lobbyVis) {
     const vis = mp.visibility === "private" ? "Private" : "Public";
     const code = mp.visibility === "private" && mp.roomId ? ` · code ${mp.roomId}` : "";
@@ -1176,7 +1185,7 @@ function openHostLobby(existingId, opts = {}) {
   mp.host = true;
   mp.myName = "Host";
   mp.visibility = opts.visibility === "private" ? "private" : "public";
-  mp.roomTitle = (opts.title || "").trim().slice(0, 32);
+  syncRoomTitle();
   if (existingId) mp.roomId = existingId;
   selectLobbyMode("guess");
   showLobby();
@@ -1590,9 +1599,12 @@ function setLobbyScope(scope, broadcast = false) {
   document.querySelectorAll("#lobby-scopes .scope-btn").forEach((b) =>
     b.classList.toggle("selected", b.dataset.scope === scope)
   );
+  syncRoomTitle();
+  if (el.lobbyTitle) el.lobbyTitle.textContent = roomTitleFromParams();
   if (broadcast && mp.host && mp.net) {
-    mp.net.send({ t: "scope", scope, ...regionPayload() });
+    mp.net.send({ t: "scope", scope, title: mp.roomTitle, ...regionPayload() });
     publishRoom();
+    renderLobby();
   }
 }
 document.querySelectorAll("#lobby-scopes .scope-btn").forEach((btn) => {
@@ -2078,25 +2090,9 @@ el.btnMulti.addEventListener("click", () => {
   showRooms();
 });
 el.roomsBack?.addEventListener("click", () => showLanding());
-el.btnCreatePublic?.addEventListener("click", () => {
+el.btnCreateRoom?.addEventListener("click", () => {
   unlockAudio();
-  openHostLobby(null, { visibility: "public", title: el.roomTitle?.value || "" });
-});
-el.btnCreatePrivate?.addEventListener("click", () => {
-  unlockAudio();
-  openHostLobby(null, { visibility: "private", title: el.roomTitle?.value || "" });
-});
-el.btnJoinCode?.addEventListener("click", () => {
-  const id = parseJoinCode(el.roomCode?.value);
-  if (!id) {
-    setRoomsStatus("Enter a room code or invite link", true);
-    return;
-  }
-  unlockAudio();
-  openGuestLobby(id);
-});
-el.roomCode?.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") el.btnJoinCode?.click();
+  openHostLobby(null, { visibility: el.roomVis?.checked ? "private" : "public" });
 });
 el.menuBack.addEventListener("click", () => showLanding());
 el.lobbyBack.addEventListener("click", () => showRooms());
