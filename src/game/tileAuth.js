@@ -7,9 +7,7 @@ const COOL_MS = 90 * 1000;
 
 /** Always-on photorealistic budget. Do not lower these when a key is throttled. */
 export const TILE_QUALITY = {
-  // Lower = refine sooner / sharper. Light falloff keeps only the far
-  // haze coarse so trees and buildings start loading a few km out.
-  errorTarget: 2,
+  errorTarget: 6,
   errorFalloff: 0,
   errorFalloffDensity: 1e-4,
   maxJobs: 16,
@@ -327,7 +325,7 @@ export class TileKeyPool {
       }
     }
     let last = null;
-    for (let attempt = 0; attempt < 8; attempt++) {
+    for (let attempt = 0; attempt < 3; attempt++) {
       if (options?.signal?.aborted) {
         return last || new Response("", { status: 499, statusText: "Aborted" });
       }
@@ -339,8 +337,7 @@ export class TileKeyPool {
       if (last.ok) return last;
       if (last.status === 429 || last.status === 502 || last.status === 503) {
         this.lastErr = String(last.status);
-        // Stay LOADING so the parent tile is not dropped for a white hole.
-        await new Promise((r) => setTimeout(r, 350 * (attempt + 1)));
+        await new Promise((r) => setTimeout(r, 250 * (attempt + 1)));
         continue;
       }
       if (last.status === 401 || last.status === 403) {
