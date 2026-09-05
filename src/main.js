@@ -50,7 +50,7 @@ import {
   primeAudio,
 } from "./game/explosion.js";
 import { updateEngineSound, engineDebug } from "./game/engineSound.js";
-import { updateMusic, primeMusic, musicDebug } from "./game/music.js";
+import { updateMusic, primeMusic, musicDebug, musicEnabled, setMusicEnabled } from "./game/music.js";
 
 // rakieta stoi pionowo (+Y) — połóż ją nosem do przodu (-Z, konwencja lotu)
 function prepareRocket(model) {
@@ -2167,6 +2167,22 @@ function unlockAudio() {
     /* iOS can reject AudioContext; flight still works */
   }
 }
+
+function syncMusicButtons() {
+  const label = musicEnabled() ? "Music: On" : "Music: Off";
+  document.querySelectorAll(".music-btn").forEach((btn) => {
+    btn.textContent = label;
+  });
+}
+syncMusicButtons();
+document.querySelectorAll(".music-btn").forEach((btn) => {
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    setMusicEnabled(!musicEnabled());
+    syncMusicButtons();
+  });
+});
+
 window.addEventListener("pointerdown", unlockAudio);
 window.addEventListener("keydown", unlockAudio);
 
@@ -2615,7 +2631,7 @@ el.stick?.addEventListener("touchmove", (e) => e.preventDefault(), { passive: fa
 
 function syncTouchUi() {
   if (!el.touch) return;
-  const show = !menuOpen && !paused && !guessOpen && !crashed && !finished;
+  const show = !menuOpen && !paused && !leaveOpen && !guessOpen && !crashed && !finished;
   el.touch.classList.toggle("hidden", !show);
   el.touch.classList.toggle("show", show);
   el.touch.classList.toggle("talk", voiceEnabled());

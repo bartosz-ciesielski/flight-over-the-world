@@ -17,7 +17,7 @@
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
-    <audio id="bgm" autoplay loop playsinline preload="auto" src="./music/theme.mp3"></audio>
+    <audio id="bgm" loop playsinline preload="auto" src="./music/theme.mp3"></audio>
     <div id="fatal" class="hidden">
       <div class="fatal-card">
         <h2>Could not start</h2>
@@ -43,6 +43,7 @@
           <button id="btn-solo" type="button">Single player</button>
           <button id="btn-multi" type="button">Multiplayer</button>
         </div>
+        <button class="music-btn" type="button">Music: On</button>
       </div>
     </div>
 
@@ -150,6 +151,7 @@
         <p id="pause-sub" class="pause-sub"></p>
         <button id="btn-resume" type="button">Continue</button>
         <button id="btn-restart" class="ghost" type="button">Start over</button>
+        <button class="music-btn" type="button">Music: On</button>
       </div>
     </div>
 
