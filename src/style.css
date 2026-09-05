@@ -58,7 +58,7 @@ button, .mode-card, .scope-btn {
   right: max(22px, env(safe-area-inset-right));
   z-index: 10;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   padding: 8px 14px;
   background: rgba(18, 14, 10, 0.72);
@@ -72,6 +72,15 @@ button, .mode-card, .scope-btn {
 }
 
 #mp-online.hidden { display: none; }
+
+.online-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #3dcc6a;
+  box-shadow: 0 0 8px rgba(61, 204, 106, 0.75);
+  flex: 0 0 auto;
+}
 
 .mp-online-hint {
   font-size: 11px;
