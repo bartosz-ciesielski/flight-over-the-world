@@ -372,6 +372,8 @@ const el = {
   roomsBack: document.getElementById("rooms-back"),
   roomVis: document.getElementById("room-vis"),
   btnCreateRoom: document.getElementById("btn-create-room"),
+  btnCreateConfirm: document.getElementById("btn-create-confirm"),
+  roomsCreatePanel: document.getElementById("rooms-create-panel"),
   lobby: document.getElementById("lobby"),
   lobbyTitle: document.getElementById("lobby-title"),
   lobbyVis: document.getElementById("lobby-vis"),
@@ -618,7 +620,7 @@ function renderRoomList() {
   if (!el.roomsList) return;
   const live = publicRooms.filter((r) => r.id !== mp.roomId);
   if (!live.length) {
-    const msg = roomsLooking ? "Looking for public rooms…" : "No public rooms yet — create one";
+    const msg = "No rooms yet — create the first one";
     el.roomsList.innerHTML = `<div class="room-row empty">${msg}</div>`;
     return;
   }
@@ -2089,9 +2091,18 @@ el.btnMulti.addEventListener("click", () => {
   unlockAudio();
   showRooms();
 });
+function showCreatePanel(show) {
+  el.roomsCreatePanel?.classList.toggle("hidden", !show);
+}
+
 el.roomsBack?.addEventListener("click", () => showLanding());
 el.btnCreateRoom?.addEventListener("click", () => {
   unlockAudio();
+  showCreatePanel(true);
+});
+el.btnCreateConfirm?.addEventListener("click", () => {
+  unlockAudio();
+  showCreatePanel(false);
   openHostLobby(null, { visibility: el.roomVis?.checked ? "private" : "public" });
 });
 el.menuBack.addEventListener("click", () => showLanding());

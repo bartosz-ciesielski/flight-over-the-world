@@ -50,18 +50,23 @@
       <div class="menu-card rooms-card">
         <button id="rooms-back" class="back-btn" type="button">‹ Back</button>
         <h1>Multiplayer</h1>
-        <p class="landing-sub">Guess the region — join a public room or host your own</p>
-        <div id="rooms-list" class="rooms-list"></div>
-        <p id="rooms-status" class="hidden"></p>
-        <div class="rooms-create">
-          <label class="vis-switch">
-            <span>Public</span>
-            <input id="room-vis" type="checkbox" />
-            <span class="vis-track" aria-hidden="true"><i></i></span>
-            <span>Private</span>
-          </label>
+        <div class="rooms-head">
+          <p class="landing-sub">Guess the region — join a public room or host your own</p>
           <button id="btn-create-room" type="button">Create room</button>
         </div>
+        <div class="rooms-board">
+          <div id="rooms-list" class="rooms-list"></div>
+          <div id="rooms-create-panel" class="rooms-create-panel hidden">
+            <label class="vis-switch">
+              <span>Public</span>
+              <input id="room-vis" type="checkbox" />
+              <span class="vis-track" aria-hidden="true"><i></i></span>
+              <span>Private</span>
+            </label>
+            <button id="btn-create-confirm" type="button">Create</button>
+          </div>
+        </div>
+        <p id="rooms-status" class="hidden"></p>
       </div>
     </div>
 

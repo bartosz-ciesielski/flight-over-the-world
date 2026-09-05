@@ -443,21 +443,82 @@ kbd {
 
 .rooms-card { width: min(640px, calc(100vw - 48px)); }
 
+.rooms-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: -6px 0 18px;
+}
+
+.rooms-head .landing-sub {
+  margin: 0;
+  text-align: left;
+}
+
+#btn-create-room {
+  flex: 0 0 auto;
+  padding: 10px 16px;
+  background: var(--gold);
+  border: none;
+  border-radius: 6px;
+  color: #1c1710;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.rooms-board {
+  position: relative;
+  min-height: min(320px, 46vh);
+  height: min(380px, 50vh);
+}
+
 .rooms-list {
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
   gap: 8px;
-  margin: 0 0 18px;
+  margin: 0;
   text-align: left;
-  min-height: min(320px, 46vh);
-  height: min(380px, 50vh);
-  max-height: min(380px, 50vh);
+  height: 100%;
   padding: 12px;
   overflow-y: auto;
   background: rgba(243, 234, 214, 0.04);
   border: 1px solid rgba(243, 234, 214, 0.16);
   border-radius: 10px;
+}
+
+.rooms-create-panel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 24px;
+  background: rgba(16, 22, 15, 0.82);
+  border: 1px solid rgba(243, 234, 214, 0.16);
+  border-radius: 10px;
+}
+
+.rooms-create-panel.hidden {
+  display: none;
+}
+
+#btn-create-confirm {
+  padding: 12px 28px;
+  background: var(--gold);
+  border: none;
+  border-radius: 6px;
+  color: #1c1710;
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
 }
 
 .room-row {
@@ -519,25 +580,6 @@ kbd {
 .room-row button:disabled {
   opacity: 0.45;
   cursor: default;
-}
-
-.rooms-create {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.rooms-create button {
-  flex: 1;
-  padding: 14px 16px;
-  background: var(--gold);
-  border: none;
-  border-radius: 6px;
-  color: #1c1710;
-  font-family: inherit;
-  font-size: 15px;
-  font-weight: 700;
-  cursor: pointer;
 }
 
 .vis-switch {
@@ -1383,19 +1425,13 @@ kbd {
 
   .start-row,
   .lobby-link-row,
-  .rooms-create {
+  .rooms-head {
     flex-wrap: wrap;
   }
 
   #start-btn,
-  #lobby-copy,
-  .rooms-create button {
+  #lobby-copy {
     width: 100%;
-  }
-
-  .rooms-create {
-    flex-direction: column;
-    align-items: stretch;
   }
 
   .vis-switch {
