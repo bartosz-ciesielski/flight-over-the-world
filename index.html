@@ -195,13 +195,6 @@
         <p id="gm-timer" class="gm-timer"></p>
         <p class="sub" id="gm-sub">Click a point on the map of Poland</p>
         <div class="gm-body">
-          <aside id="gm-stats" class="hidden">
-            <div class="gm-stats-kicker">Guess distance</div>
-            <div class="gm-stat"><span>Average</span><b id="gm-avg">–</b></div>
-            <div class="gm-stat"><span>Best</span><b id="gm-min">–</b></div>
-            <div class="gm-stat"><span>Worst</span><b id="gm-max">–</b></div>
-            <p id="gm-stats-n">No guesses yet</p>
-          </aside>
           <canvas id="gm-canvas"></canvas>
         </div>
         <p id="gm-result"></p>
@@ -227,6 +220,7 @@
       <div id="f-banner">
         <div class="b-title"></div>
         <div class="b-sub"></div>
+        <canvas id="home-trail" width="640" height="400" hidden></canvas>
         <div class="gm-actions" id="banner-actions">
           <button id="banner-retry" type="button">Try again</button>
           <button id="banner-menu" class="ghost" type="button">Back to menu</button>
@@ -239,6 +233,14 @@
         <canvas id="g-hdg" class="gauge"></canvas>
       </div>
 
+      <div id="f-guess-stats" hidden>
+        <div class="f-label">Guess distance</div>
+        <div class="f-stat"><span>Average</span><b id="gm-avg">–</b></div>
+        <div class="f-stat"><span>Best</span><b id="gm-min">–</b></div>
+        <div class="f-stat"><span>Worst</span><b id="gm-max">–</b></div>
+        <p id="gm-stats-n">No guesses yet</p>
+      </div>
+
       <div id="f-center">
         <div class="f-box" id="f-timer-box"><span class="f-label">Time left</span><span id="f-timer">10:00</span></div>
         <div class="f-box" id="f-dist-box"><span class="f-label">To target</span><span id="f-dist">–</span></div>
@@ -249,6 +251,8 @@
         <canvas id="mm-canvas" width="220" height="220"></canvas>
         <span class="mm-hint">M</span>
       </button>
+
+      <div id="map-note" hidden>Map unavailable in this mode</div>
     </div>
 
     <div id="touch" class="hidden">

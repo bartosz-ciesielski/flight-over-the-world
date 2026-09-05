@@ -175,8 +175,14 @@ export class PlaneController {
     const hold = ctrl.throttle > 0 ? 1 : ctrl.throttle < 0 ? 0 : this.cruiseT;
     const rate = ctrl.throttle !== 0 ? 0.55 : 1.7;
     this.throttle += (hold - this.throttle) * Math.min(1, rate * dt);
-    const targetSpeed = this.brake + this.throttle * (this.boost - this.brake);
-    this.speed += (targetSpeed - this.speed) * Math.min(1, 2.2 * dt);
+    const span = this.boost - this.brake;
+    const throttleSpeed = this.brake + this.throttle * span;
+    // nos w dół = ujemny pitch: więcej i szybciej prędkości niż przy wznoszeniu
+    const incline = Math.sin(this.pitch);
+    const slopeTarget = throttleSpeed - incline * span * 0.55;
+    const settle = incline < 0 ? 3.1 : 1.45;
+    this.speed += (slopeTarget - this.speed) * Math.min(1, settle * dt);
+    this.speed = Math.max(this.brake * 0.55, Math.min(this.boost * 1.18, this.speed));
 
     // zakręt przez przechylenie
     this.heading += -Math.sin(this.roll) * (this.speed / 55) * dt * 0.85;

@@ -59,7 +59,7 @@ import {
   applyTileQuality,
 } from "./game/tileAuth.js";
 import { createHoldParentTilesPlugin } from "./game/holdParentTiles.js";
-import { createFreeMap, createMiniMap } from "./game/freeMap.js";
+import { createFreeMap, createMiniMap, paintTrailMap } from "./game/freeMap.js";
 
 // rakieta stoi pionowo (+Y) — połóż ją nosem do przodu (-Z, konwencja lotu)
 function prepareRocket(model) {
@@ -318,6 +318,7 @@ let camOffset = PLANES.pa28.cam;
 // tryby gry
 let mode = "free"; // free | home | guess
 let homeTarget = null;
+const homePath = [];
 let timeLeft = 0;
 let timerActive = false;
 let guessOpen = false;
@@ -413,10 +414,6 @@ function recordSoloGuess(errKm) {
 }
 
 function renderGuessStats() {
-  if (!el.gmStats) return;
-  const solo = !mp.active;
-  el.gmStats.classList.toggle("hidden", !solo);
-  if (!solo) return;
   if (!guessStats.n) {
     if (el.gmAvg) el.gmAvg.textContent = "–";
     if (el.gmMin) el.gmMin.textContent = "–";
@@ -428,6 +425,19 @@ function renderGuessStats() {
   if (el.gmMin) el.gmMin.textContent = fmtGuessKm(guessStats.min);
   if (el.gmMax) el.gmMax.textContent = fmtGuessKm(guessStats.max);
   if (el.gmStatsN) el.gmStatsN.textContent = guessStats.n === 1 ? "1 guess" : `${guessStats.n} guesses`;
+}
+
+function syncGuessHud() {
+  const show =
+    mode === "guess" &&
+    !mp.active &&
+    !menuOpen &&
+    !paused &&
+    !leaveOpen &&
+    !guessOpen &&
+    guessStats.n > 0;
+  if (el.guessHud) el.guessHud.hidden = !show;
+  if (show) renderGuessStats();
 }
 
 function savedNick() {
@@ -555,6 +565,7 @@ const el = {
   banner: document.getElementById("f-banner"),
   bannerRetry: document.getElementById("banner-retry"),
   bannerMenu: document.getElementById("banner-menu"),
+  homeTrail: document.getElementById("home-trail"),
   menu: document.getElementById("menu"),
   city: document.getElementById("city-input"),
   start: document.getElementById("start-btn"),
@@ -582,7 +593,7 @@ const el = {
   gmSub: document.getElementById("gm-sub"),
   gmScoreLeft: document.getElementById("gm-score-left"),
   gmScoreRight: document.getElementById("gm-score-right"),
-  gmStats: document.getElementById("gm-stats"),
+  guessHud: document.getElementById("f-guess-stats"),
   gmAvg: document.getElementById("gm-avg"),
   gmMin: document.getElementById("gm-min"),
   gmMax: document.getElementById("gm-max"),
@@ -642,6 +653,7 @@ const el = {
   fmClose: document.getElementById("fm-close"),
   minimap: document.getElementById("minimap"),
   mmCanvas: document.getElementById("mm-canvas"),
+  mapNote: document.getElementById("map-note"),
   lobbyCarCanvas: document.getElementById("lobby-carousel-canvas"),
   lobbyCarPrev: document.getElementById("lobby-car-prev"),
   lobbyCarNext: document.getElementById("lobby-car-next"),
@@ -695,6 +707,26 @@ function updateLocationMaps() {
   if (freeMap.open && pose) {
     freeMap.update(pose.lat, pose.lon, pose.heading, pose.name);
   }
+}
+
+let mapNoteTimer = 0;
+
+function hideMapNote() {
+  if (mapNoteTimer) {
+    clearTimeout(mapNoteTimer);
+    mapNoteTimer = 0;
+  }
+  if (!el.mapNote) return;
+  el.mapNote.classList.remove("show");
+  el.mapNote.hidden = true;
+}
+
+function showMapUnavailable() {
+  if (!el.mapNote || menuOpen || paused || guessOpen) return;
+  el.mapNote.hidden = false;
+  el.mapNote.classList.add("show");
+  if (mapNoteTimer) clearTimeout(mapNoteTimer);
+  mapNoteTimer = setTimeout(hideMapNote, 2200);
 }
 
 function toggleFreeMap() {
@@ -2402,6 +2434,7 @@ function resetFlight(latDeg, lonDeg) {
   ctrl.pitch = 0;
   camInit = false;
   if (planeMesh) planeMesh.visible = true;
+  homePath.length = 0;
   hideBanner();
 }
 
@@ -2530,6 +2563,7 @@ function crash() {
   playExplosionSound();
   shake = 1;
   if (planeMesh) planeMesh.visible = false;
+  if (mode === "home" && plane) homePath.push({ lat: plane.latDeg, lon: plane.lonDeg });
   if (mp.active && mode === "guess") return; // runda trwa — po minucie i tak zgadujecie
   timerActive = false;
   setTimeout(() => showBanner("YOU CRASHED"), 900);
@@ -2699,6 +2733,7 @@ function finishSnapStart() {
   }
   setTimeout(clearStarting, 2500);
   armCrashGrace();
+  syncGuessHud();
 }
 
 function unlockAudio() {
@@ -2838,7 +2873,9 @@ function setPaused(v) {
   if (v) {
     freeMap.hide();
     miniMap.hide();
+    hideMapNote();
   }
+  syncGuessHud();
   syncPauseCopy();
   el.pause.classList.toggle("show", v);
 }
@@ -2866,6 +2903,7 @@ function backToMenu() {
   beacon.visible = false;
   freeMap.hide();
   miniMap.hide();
+  hideMapNote();
   el.guessmap.classList.remove("show");
   hidePlaceBadge();
   el.start.disabled = false;
@@ -2874,6 +2912,7 @@ function backToMenu() {
   el.lobby.classList.add("hidden");
   el.menu.classList.remove("hidden");
   carousel.setActive(true);
+  syncGuessHud();
 }
 
 // --- mapa zgadywania ---
@@ -2926,6 +2965,7 @@ function openGuessMap() {
   }
   updateGuessPhaseUi();
   el.guessmap.classList.add("show");
+  syncGuessHud();
   const draw = () => requestAnimationFrame(() => drawGuessMap());
   if (guessGeoReady()) {
     draw();
@@ -3125,9 +3165,10 @@ window.addEventListener("keydown", (e) => {
     if (!e.repeat) startTalk();
     return;
   }
-  if (k === "m" && !e.repeat && mode === "free" && !menuOpen && !guessOpen) {
+  if (k === "m" && !e.repeat && !menuOpen && !guessOpen && !paused) {
     e.preventDefault();
-    toggleFreeMap();
+    if (mode === "free") toggleFreeMap();
+    else showMapUnavailable();
     return;
   }
   if (menuOpen || paused || guessOpen) return;
@@ -3557,6 +3598,7 @@ function tickFrame() {
       timerActive = false;
       if (mode === "home") {
         finished = true;
+        if (plane) homePath.push({ lat: plane.latDeg, lon: plane.lonDeg });
         showBanner("TIME'S UP");
       } else if (mode === "guess") {
         openGuessMap();
@@ -3574,18 +3616,23 @@ function tickFrame() {
       if (mp.resultsLeft <= 0 && mp.host && !mp.launching) launchMpRound();
     }
   }
+  if (mode === "home" && flying && frameCount % 8 === 0) recordHomePath();
   if (mode === "home" && homeTarget && flying) {
     const dist = distanceM(plane.latDeg, plane.lonDeg, homeTarget.lat, homeTarget.lon);
     if (dist < HOME_CAPTURE_M) {
       finished = true;
       timerActive = false;
       beacon.visible = false;
+      homePath.push({ lat: homeTarget.lat, lon: homeTarget.lon });
       showBanner("YOU MADE IT HOME!");
     }
   }
 
   // HUD
-  if (frameCount % 2 === 0) updateHud(agl);
+  if (frameCount % 2 === 0) {
+    updateHud(agl);
+    syncGuessHud();
+  }
   if (frameCount % 4 === 0) syncTouchUi();
   if (mode === "free" && !menuOpen && frameCount % 90 === 0) syncPlaceBadge();
   if (frameCount % 2 === 0) updateLocationMaps();
@@ -3704,15 +3751,46 @@ function updateHud(agl) {
   }
 }
 
+function recordHomePath() {
+  if (mode !== "home" || !plane || pendingSnap || awaitingSnap || menuOpen) return;
+  const lat = plane.latDeg;
+  const lon = plane.lonDeg;
+  const last = homePath[homePath.length - 1];
+  if (last && distanceM(last.lat, last.lon, lat, lon) < 90) return;
+  homePath.push({ lat, lon });
+  if (homePath.length > 900) homePath.splice(0, homePath.length - 800);
+}
+
+function showHomeTrail() {
+  if (!el.homeTrail || !el.banner) return false;
+  if (mode !== "home") return false;
+  const start = { lat: startLat, lon: startLon };
+  const home = homeTarget ? { lat: homeTarget.lat, lon: homeTarget.lon } : null;
+  if (!home && homePath.length < 2) return false;
+  el.homeTrail.hidden = false;
+  el.banner.classList.add("trail");
+  requestAnimationFrame(() => {
+    paintTrailMap(el.homeTrail, { path: homePath, start, home });
+  });
+  return true;
+}
+
 function showBanner(title, sub = "") {
   if (!el.banner) return;
   el.banner.querySelector(".b-title").textContent = title;
   const subEl = el.banner.querySelector(".b-sub");
   subEl.textContent = sub;
   subEl.style.display = sub ? "" : "none";
+  if (!showHomeTrail()) {
+    if (el.homeTrail) el.homeTrail.hidden = true;
+    el.banner.classList.remove("trail");
+  }
   el.banner.classList.add("show");
 }
 
 function hideBanner() {
-  if (el.banner) el.banner.classList.remove("show");
+  if (el.banner) {
+    el.banner.classList.remove("show", "trail");
+  }
+  if (el.homeTrail) el.homeTrail.hidden = true;
 }

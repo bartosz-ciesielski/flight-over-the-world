@@ -242,6 +242,32 @@ kbd {
   border-radius: 50%;
 }
 
+#map-note {
+  position: absolute;
+  left: max(22px, env(safe-area-inset-left));
+  bottom: 36px;
+  max-width: 220px;
+  padding: 10px 14px;
+  background: rgba(18, 14, 10, 0.72);
+  border: 1px solid rgba(243, 234, 214, 0.18);
+  border-radius: 8px;
+  color: var(--paper);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+#map-note.show {
+  opacity: 1;
+  transform: none;
+}
+
+#map-note[hidden] { display: none; }
+
 .mm-hint {
   position: absolute;
   left: 50%;
@@ -459,6 +485,24 @@ kbd {
 }
 
 #f-banner .gm-actions { margin-top: 18px; }
+
+#f-banner.trail {
+  top: 50%;
+  width: min(680px, 92vw);
+  padding: 20px 20px 16px;
+}
+
+#home-trail {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 640 / 400;
+  margin: 14px 0 2px;
+  border-radius: 8px;
+  background: #c9d4c0;
+}
+
+#home-trail[hidden] { display: none; }
 
 /* --- menu startowe --- */
 
@@ -1223,6 +1267,45 @@ kbd {
 
 /* --- HUD środek (timer / dystans) --- */
 
+#f-guess-stats {
+  position: absolute;
+  left: max(22px, env(safe-area-inset-left));
+  top: max(22px, env(safe-area-inset-top));
+  min-width: 158px;
+  padding: 10px 14px 11px;
+  background: rgba(18, 14, 10, 0.55);
+  border: 1px solid rgba(243, 234, 214, 0.12);
+  backdrop-filter: blur(10px);
+  border-radius: 6px;
+}
+
+#f-guess-stats[hidden] { display: none; }
+
+#f-guess-stats .f-label {
+  margin-bottom: 6px;
+}
+
+.f-stat {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 14px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.f-stat b {
+  color: var(--paper);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+#gm-stats-n {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 #f-center {
   position: absolute;
   top: 28px;
@@ -1353,59 +1436,13 @@ kbd {
 
 .gm-body {
   display: flex;
-  align-items: stretch;
   justify-content: center;
-  gap: 14px;
   width: min(1080px, 88vw);
 }
 
-#gm-stats {
-  flex: 0 0 158px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  align-self: flex-start;
-  padding: 14px 14px 12px;
-  background: rgba(243, 234, 214, 0.05);
-  border: 1px solid rgba(243, 234, 214, 0.14);
-  border-radius: 8px;
-}
-
-#gm-stats.hidden { display: none; }
-
-.gm-stats-kicker {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--gold);
-}
-
-.gm-stat {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 10px;
-  font-size: 14px;
-  color: var(--muted);
-}
-
-.gm-stat b {
-  color: var(--paper);
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
-}
-
-#gm-stats-n {
-  margin: 2px 0 0;
-  font-size: 12px;
-  color: var(--muted);
-}
-
 #gm-canvas {
-  flex: 1;
+  display: block;
   width: 100%;
-  min-width: 0;
   height: min(720px, 72vh);
   border-radius: 8px;
   border: 1px solid rgba(243, 234, 214, 0.2);
@@ -1726,6 +1763,13 @@ kbd {
 
   .mm-hint { display: none; }
 
+  #map-note {
+    left: max(12px, env(safe-area-inset-left));
+    bottom: max(168px, calc(env(safe-area-inset-bottom) + 152px));
+    max-width: 160px;
+    font-size: 13px;
+  }
+
   #f-instruments {
     left: 10px;
     right: auto;
@@ -1737,6 +1781,20 @@ kbd {
   .gauge {
     width: 62px;
     height: 62px;
+  }
+
+  #f-banner.trail {
+    width: min(680px, calc(100vw - 20px));
+    padding: 16px 12px 12px;
+  }
+
+  #f-banner.trail .b-title { font-size: 24px; }
+
+  #f-guess-stats {
+    top: max(80px, calc(env(safe-area-inset-top) + 72px));
+    left: max(10px, env(safe-area-inset-left));
+    min-width: 0;
+    padding: 8px 10px 9px;
   }
 
   #f-center {
@@ -1833,24 +1891,8 @@ kbd {
   }
 
   .gm-body {
-    flex-direction: column;
     width: 100%;
   }
-
-  #gm-stats {
-    flex: none;
-    width: 100%;
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 10px 16px;
-  }
-
-  .gm-stats-kicker { width: 100%; }
-
-  .gm-stat { flex: 1 1 auto; }
-
-  #gm-stats-n { margin: 0; }
 
   #gm-canvas {
     width: 100%;
