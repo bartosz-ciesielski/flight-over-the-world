@@ -139,8 +139,6 @@ const GUESS_SCOPES = {
 };
 
 const tilePool = new TileKeyPool(loadTileSlots());
-const ION_KEY = tilePool.firstIonToken;
-const API_KEY = tilePool.firstGoogleToken;
 const TERRAIN_ALT = 120; // przybliżona wysokość elipsoidalna nizin
 
 // Google wyłączyło Photorealistic 3D Tiles dla kont billingowych z EEA (403).
@@ -212,35 +210,21 @@ let tile429Count = 0;
 let lastFailedRetryAt = 0;
 let lastTileErr = "";
 let pendingFailedRetry = false;
-let tileRotateBusy = false;
 
 function onTileThrottle(status = 429) {
-  if (!tiles || tileRotateBusy) return;
-  tileRotateBusy = true;
+  if (!tiles) return;
   tile429Count += 1;
   lastTileErr = String(status);
   pendingFailedRetry = true;
-  tilePool
-    .rotate(status)
-    .then((switched) => {
-      syncTileAuth(tiles, tilePool);
-      applyTileQuality(tiles);
-      if (switched) {
-        tileHoldUntil = 0;
-        pendingFailedRetry = true;
-        return;
-      }
-      // jeden klucz albo wszystkie w cooldown — krótka pauza, jakość bez zmian
-      tiles.downloadQueue.maxJobsPerOrigin = 0;
-      tileHoldUntil = performance.now() + 8000;
-    })
-    .catch((err) => {
-      lastTileErr = String(err?.message || err).slice(0, 220);
-      pendingFailedRetry = true;
-    })
-    .finally(() => {
-      tileRotateBusy = false;
-    });
+  const ready = tilePool.debug().ready;
+  if (ready > 0) {
+    tileHoldUntil = 0;
+    applyTileQuality(tiles);
+    return;
+  }
+  if (tileHoldUntil && performance.now() < tileHoldUntil) return;
+  tiles.downloadQueue.maxJobsPerOrigin = 0;
+  tileHoldUntil = performance.now() + 8000;
 }
 
 function releaseTileHold() {
@@ -2007,9 +1991,16 @@ el.lobbyCity.addEventListener("input", () => {
   if (mp.host && mp.net) mp.net.send({ t: "city", city: el.lobbyCity.value });
 });
 
-function init() {
+async function init() {
   if (!tilePool.slots.length) {
     setLoader("Missing map keys – add VITE_CESIUM_ION_KEYS to .env", 0);
+    return;
+  }
+  setLoader("Connecting to map…", 0.4);
+  const ready = await tilePool.warmup();
+  if (!ready) {
+    loadError = "Cesium ion rejected the map tokens. On each account add Google Photorealistic 3D Tiles (asset 2275207) and create a new token.";
+    setLoader(loadError, 0);
     return;
   }
   setLoader("Start…", 0.4);
@@ -2062,23 +2053,23 @@ function init() {
     fetchData(url, options) {
       const g = this.tiles.getPluginByName("GOOGLE_CLOUD_AUTH_PLUGIN");
       if (g?.auth) g.auth.autoRefreshToken = false;
-      if (tilePool.current?.session) {
-        return tilePool.fetchData(url, options).then((res) => {
-          if (res && (res.status === 429 || res.status === 403)) onTileThrottle(res.status);
-          return res;
-        });
-      }
-      if (g?.fetchData) return g.fetchData(url, options);
-      const ion = this.tiles.getPluginByName("CESIUM_ION_AUTH_PLUGIN");
-      if (ion?.auth) return ion.auth.fetch(url, options);
-      return null;
+      return tilePool.fetchData(url, options).then((res) => {
+        if (res && (res.status === 429 || res.status === 403 || res.status === 401)) {
+          onTileThrottle(res.status);
+        }
+        return res;
+      }).catch((err) => {
+        lastTileErr = String(err?.message || err).slice(0, 220);
+        pendingFailedRetry = true;
+        return new Response("", { status: 599, statusText: lastTileErr });
+      });
     },
   });
   const startSlot = tilePool.current;
-  if (startSlot?.kind === "ion" || ION_KEY) {
+  if (startSlot?.kind === "ion") {
     tiles.registerPlugin(
       new CesiumIonAuthPlugin({
-        apiToken: startSlot?.kind === "ion" ? startSlot.token : ION_KEY,
+        apiToken: startSlot.token,
         assetId: ION_GOOGLE_TILES_ASSET,
         autoRefreshToken: false,
         useRecommendedSettings: false,
@@ -2087,7 +2078,7 @@ function init() {
   } else {
     tiles.registerPlugin(
       new GoogleCloudAuthPlugin({
-        apiToken: startSlot?.token || API_KEY,
+        apiToken: startSlot?.token || tilePool.firstGoogleToken,
         useRecommendedSettings: false,
       })
     );
@@ -3089,7 +3080,7 @@ const skyFramePos = new Vector3();
 const skyFrameScale = new Vector3();
 let camInit = false;
 
-init();
+void init();
 animate();
 
 window.addEventListener("error", (e) => {

@@ -2,6 +2,8 @@ const ION_ASSET = "2275207";
 const GOOGLE_ROOT = "https://tile.googleapis.com/v1/3dtiles/root.json";
 const ION_ENDPOINT = `https://api.cesium.com/v1/assets/${ION_ASSET}/endpoint`;
 const SLOT_KEY = "foe-tile-slot";
+const DEAD_MS = 24 * 60 * 60 * 1000;
+const COOL_MS = 90 * 1000;
 
 /** Always-on photorealistic budget. Do not lower these when a key is throttled. */
 export const TILE_QUALITY = {
@@ -46,6 +48,11 @@ function extractSession(tileset) {
   return walk(tileset?.root || tileset);
 }
 
+function statusOf(err) {
+  const m = String(err?.message || err || "").match(/\b(401|403|429|502|503)\b/);
+  return m ? Number(m[1]) : 0;
+}
+
 export function loadTileSlots() {
   const ion = unique([
     ...splitKeys(import.meta.env.VITE_CESIUM_ION_KEYS),
@@ -53,7 +60,7 @@ export function loadTileSlots() {
   ]);
   const google = unique([
     ...splitKeys(import.meta.env.VITE_GOOGLE_TILES_KEYS),
-    ...(ion.length ? [] : splitKeys(import.meta.env.VITE_GOOGLE_MAPS_KEY)),
+    ...splitKeys(import.meta.env.VITE_GOOGLE_MAPS_KEY),
   ]);
   return [
     ...ion.map((token) => ({ kind: "ion", token })),
@@ -68,7 +75,9 @@ export class TileKeyPool {
       id,
       coolUntil: 0,
       fails: 0,
+      dead: false,
       session: null,
+      pending: null,
     }));
     this.index = this.#restoreIndex();
     this.rotating = null;
@@ -82,11 +91,15 @@ export class TileKeyPool {
   }
 
   get firstIonToken() {
-    return this.slots.find((s) => s.kind === "ion")?.token || "";
+    return this.slots.find((s) => s.kind === "ion" && !s.dead)?.token
+      || this.slots.find((s) => s.kind === "ion")?.token
+      || "";
   }
 
   get firstGoogleToken() {
-    return this.slots.find((s) => s.kind === "google")?.token || "";
+    return this.slots.find((s) => s.kind === "google" && !s.dead)?.token
+      || this.slots.find((s) => s.kind === "google")?.token
+      || "";
   }
 
   debug() {
@@ -95,7 +108,9 @@ export class TileKeyPool {
       keys: this.slots.length,
       slot: this.index,
       kind: this.current?.kind || "",
-      cooling: this.slots.filter((s) => s.coolUntil > now).length,
+      dead: this.slots.filter((s) => s.dead).length,
+      cooling: this.slots.filter((s) => !s.dead && s.coolUntil > now).length,
+      ready: this.slots.filter((s) => !s.dead && s.coolUntil <= now).length,
       switches: this.switches,
       err: this.lastErr,
     };
@@ -125,46 +140,93 @@ export class TileKeyPool {
     if (!n) return 0;
     for (let step = 0; step < n; step++) {
       const i = (this.index + step) % n;
-      if (this.slots[i].coolUntil <= now) return i;
+      const slot = this.slots[i];
+      if (!slot.dead && slot.coolUntil <= now) return i;
     }
-    let best = 0;
-    for (let i = 1; i < n; i++) {
-      if (this.slots[i].coolUntil < this.slots[best].coolUntil) best = i;
+    let best = -1;
+    for (let i = 0; i < n; i++) {
+      if (this.slots[i].dead) continue;
+      if (best < 0 || this.slots[i].coolUntil < this.slots[best].coolUntil) best = i;
     }
-    return best;
+    return best < 0 ? this.index : best;
+  }
+
+  markStatus(slot, status) {
+    if (!slot) return;
+    const code = Number(status) || 0;
+    this.lastErr = String(status);
+    slot.fails += 1;
+    if (code === 401 || (slot.kind === "ion" && code === 403)) {
+      slot.dead = true;
+      slot.session = null;
+      slot.coolUntil = Date.now() + DEAD_MS;
+      return;
+    }
+    // 429 / transient — keep the live session so tiles can resume without
+    // re-fetching root.json (that call is also rate-limited).
+    slot.coolUntil = Date.now() + (code === 403 || slot.fails > 4 ? 15 * 60 * 1000 : COOL_MS);
   }
 
   async ensureSession(slot = this.current) {
-    if (!slot) throw new Error("No map keys configured");
+    if (!slot || slot.dead) return null;
     if (slot.session?.key) return slot.session;
-    if (slot.kind === "ion") {
-      const endpoint = `${ION_ENDPOINT}?access_token=${encodeURIComponent(slot.token)}`;
-      const ep = await fetch(endpoint);
-      if (!ep.ok) throw new Error(`Cesium ion ${ep.status}`);
-      const json = await ep.json();
-      const rootUrl = json.options?.url || json.url;
-      if (!rootUrl) throw new Error("Cesium ion endpoint has no tiles URL");
+    if (slot.pending) return slot.pending;
+    slot.pending = this.#fetchSession(slot);
+    try {
+      return await slot.pending;
+    } finally {
+      slot.pending = null;
+    }
+  }
+
+  async #fetchSession(slot) {
+    try {
+      if (slot.kind === "ion") {
+        const endpoint = `${ION_ENDPOINT}?access_token=${encodeURIComponent(slot.token)}`;
+        const ep = await fetch(endpoint);
+        if (!ep.ok) {
+          this.markStatus(slot, ep.status);
+          return null;
+        }
+        const json = await ep.json();
+        const rootUrl = json.options?.url || json.url;
+        if (!rootUrl) {
+          this.markStatus(slot, 401);
+          return null;
+        }
+        const root = await fetch(rootUrl);
+        if (!root.ok) {
+          this.markStatus(slot, root.status);
+          return null;
+        }
+        const tileset = await root.json();
+        const parsed = new URL(rootUrl);
+        slot.session = {
+          key: parsed.searchParams.get("key") || "",
+          session: extractSession(tileset) || parsed.searchParams.get("session") || "",
+          rootUrl,
+        };
+        slot.fails = 0;
+        return slot.session;
+      }
+      const rootUrl = `${GOOGLE_ROOT}?key=${encodeURIComponent(slot.token)}`;
       const root = await fetch(rootUrl);
-      if (!root.ok) throw new Error(`Tiles root ${root.status}`);
+      if (!root.ok) {
+        this.markStatus(slot, root.status);
+        return null;
+      }
       const tileset = await root.json();
-      const parsed = new URL(rootUrl);
       slot.session = {
-        key: parsed.searchParams.get("key") || "",
-        session: extractSession(tileset) || parsed.searchParams.get("session") || "",
+        key: slot.token,
+        session: extractSession(tileset),
         rootUrl,
       };
+      slot.fails = 0;
       return slot.session;
+    } catch (err) {
+      this.markStatus(slot, statusOf(err) || 0);
+      return null;
     }
-    const rootUrl = `${GOOGLE_ROOT}?key=${encodeURIComponent(slot.token)}`;
-    const root = await fetch(rootUrl);
-    if (!root.ok) throw new Error(`Google tiles ${root.status}`);
-    const tileset = await root.json();
-    slot.session = {
-      key: slot.token,
-      session: extractSession(tileset),
-      rootUrl,
-    };
-    return slot.session;
   }
 
   rememberPluginSession(plugin, rootUrl) {
@@ -190,13 +252,20 @@ export class TileKeyPool {
     }
   }
 
-  markCool(status) {
-    const slot = this.current;
-    if (!slot) return;
-    slot.fails += 1;
-    slot.session = null;
-    const long = status === 403 || slot.fails > 3;
-    slot.coolUntil = Date.now() + (long ? 15 * 60 * 1000 : 75 * 1000);
+  async warmup() {
+    const n = this.slots.length;
+    if (!n) return false;
+    for (let step = 0; step < n; step++) {
+      const i = (this.index + step) % n;
+      const slot = this.slots[i];
+      if (slot.dead) continue;
+      const session = await this.ensureSession(slot);
+      if (!session) continue;
+      this.index = i;
+      this.#saveIndex();
+      return true;
+    }
+    return false;
   }
 
   async rotate(status = 429) {
@@ -211,27 +280,65 @@ export class TileKeyPool {
 
   async #rotate(status) {
     this.lastErr = String(status);
-    this.markCool(status);
-    if (this.slots.length < 2) return false;
-    const next = this.pickReady();
-    if (next === this.index) return false;
-    this.index = next;
-    this.switches += 1;
-    this.#saveIndex();
-    await this.ensureSession(this.slots[this.index]);
-    this.onSwitch?.();
-    return true;
+    if (this.current) this.markStatus(this.current, status);
+    const n = this.slots.length;
+    if (n < 2) return false;
+    for (let step = 1; step < n; step++) {
+      const i = (this.index + step) % n;
+      const slot = this.slots[i];
+      if (slot.dead) continue;
+      const session = slot.session || await this.ensureSession(slot);
+      if (!session) continue;
+      if (i === this.index) return false;
+      this.index = i;
+      this.switches += 1;
+      this.#saveIndex();
+      this.onSwitch?.();
+      return true;
+    }
+    return false;
   }
 
   async fetchData(url, options) {
     if (!this.current) return fetch(url, options);
-    if (!this.current.session) await this.ensureSession();
-    let res = await fetch(this.applySessionToUrl(url), options);
-    if (res.status !== 429 && res.status !== 403) return res;
-    this.lastErr = `${res.status}`;
+    if (!this.current.session && !this.current.dead) {
+      await this.ensureSession(this.current);
+    }
+    if (!this.current?.session) {
+      const switched = await this.rotate(this.lastErr || 401);
+      if (!switched || !this.current?.session) {
+        return new Response("", { status: 401, statusText: "No map key" });
+      }
+    }
+    let res;
+    try {
+      res = await fetch(this.applySessionToUrl(url), options);
+    } catch (err) {
+      return new Response("", { status: 599, statusText: String(err?.message || err) });
+    }
+    if (res.ok || (res.status !== 429 && res.status !== 401 && res.status !== 403)) {
+      return res;
+    }
+    if (res.status === 401 || res.status === 403) {
+      const slot = this.current;
+      if (slot) slot.session = null;
+      const refreshed = await this.ensureSession(slot);
+      if (refreshed) {
+        try {
+          const retry = await fetch(this.applySessionToUrl(url), options);
+          if (retry.ok) return retry;
+        } catch {
+          /* fall through to rotate */
+        }
+      }
+    }
     const switched = await this.rotate(res.status);
-    if (!switched) return res;
-    return fetch(this.applySessionToUrl(url), options);
+    if (!switched || !this.current?.session) return res;
+    try {
+      return await fetch(this.applySessionToUrl(url), options);
+    } catch {
+      return res;
+    }
   }
 }
 
