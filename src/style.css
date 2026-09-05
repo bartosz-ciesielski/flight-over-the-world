@@ -52,6 +52,81 @@ button, .mode-card, .scope-btn {
   border-color: var(--gold);
 }
 
+#mp-online {
+  position: fixed;
+  top: max(22px, env(safe-area-inset-top));
+  right: max(22px, env(safe-area-inset-right));
+  z-index: 10;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 14px;
+  background: rgba(18, 14, 10, 0.72);
+  border: 1px solid rgba(243, 234, 214, 0.18);
+  border-radius: 8px;
+  color: var(--paper);
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+#mp-online.hidden { display: none; }
+
+.mp-online-hint {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+#mp-tab {
+  position: fixed;
+  top: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 12;
+  min-width: min(360px, calc(100vw - 32px));
+  padding: 14px 16px 12px;
+  background: rgba(18, 14, 10, 0.88);
+  border: 1px solid rgba(243, 234, 214, 0.18);
+  border-radius: 10px;
+  backdrop-filter: blur(12px);
+  pointer-events: none;
+}
+
+#mp-tab.hidden { display: none; }
+
+.mp-tab-head {
+  margin: 0 0 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+
+.mp-tab-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  padding: 7px 2px;
+  border-top: 1px solid rgba(243, 234, 214, 0.1);
+  font-size: 15px;
+}
+
+.mp-tab-row:first-child { border-top: none; }
+
+.mp-tab-row .p-name { font-weight: 600; }
+.mp-tab-row .p-you { color: var(--gold); }
+.mp-tab-row .p-score {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 #hud {
   pointer-events: none;
   position: fixed;
@@ -1370,6 +1445,16 @@ kbd {
   .hint-desk { display: none; }
   .hint-touch { display: block; }
   #touch.show { display: block; }
+  .mp-online-hint { display: none; }
+
+  #mp-online {
+    top: max(64px, calc(env(safe-area-inset-top) + 52px));
+    right: 12px;
+  }
+
+  #mp-tab {
+    top: max(112px, calc(env(safe-area-inset-top) + 100px));
+  }
 
   #f-instruments {
     left: 10px;

@@ -391,6 +391,10 @@ const el = {
   lobbyModeDesc: document.getElementById("lobby-mode-desc"),
   lobbyCity: document.getElementById("lobby-city"),
   voiceInd: document.getElementById("voice-ind"),
+  mpOnline: document.getElementById("mp-online"),
+  mpOnlineCount: document.getElementById("mp-online-count"),
+  mpTab: document.getElementById("mp-tab"),
+  mpTabList: document.getElementById("mp-tab-list"),
   touch: document.getElementById("touch"),
   touchPause: document.getElementById("touch-pause"),
   stick: document.getElementById("stick"),
@@ -709,6 +713,7 @@ function showLobby() {
   applyLobbySetup();
   renderLobby();
   updateVoiceUi();
+  updateMpPresence();
 }
 
 function setLobbyStatus(msg, isErr = false) {
@@ -768,6 +773,47 @@ function rosterPayload() {
   ];
 }
 
+let tabListOpen = false;
+
+function setTabList(open) {
+  tabListOpen = !!(open && mp.active && !menuOpen);
+  if (tabListOpen) renderTabList();
+  else el.mpTab?.classList.add("hidden");
+}
+
+function renderTabList() {
+  if (!el.mpTabList) return;
+  const people = [
+    {
+      name: mp.myName || "You",
+      score: mp.myScore || 0,
+      you: true,
+    },
+    ...otherPlayers().map((p) => ({
+      name: p.name || "Player",
+      score: p.score || 0,
+      you: false,
+    })),
+  ].sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+  el.mpTabList.innerHTML = people.map((p) => {
+    const pts = `${p.score} pt${p.score === 1 ? "" : "s"}`;
+    const you = p.you ? " (You)" : "";
+    return `<div class="mp-tab-row"><span class="p-name${p.you ? " p-you" : ""}">${escapeHtml(p.name)}${you}</span><span class="p-score">${pts}</span></div>`;
+  }).join("");
+  el.mpTab.classList.remove("hidden");
+}
+
+function updateMpPresence() {
+  const show = mp.active && !menuOpen;
+  el.mpOnline?.classList.toggle("hidden", !show);
+  if (!show) {
+    setTabList(false);
+    return;
+  }
+  if (el.mpOnlineCount) el.mpOnlineCount.textContent = `${1 + mp.players.size} online`;
+  if (tabListOpen) renderTabList();
+}
+
 function applyRoster(list = []) {
   const keep = new Set();
   for (const p of list) {
@@ -787,6 +833,7 @@ function applyRoster(list = []) {
       disposeMate(id);
     }
   }
+  updateMpPresence();
 }
 
 function broadcastRoster() {
@@ -994,6 +1041,7 @@ function handleNetData(data, fromId) {
     });
     broadcastRoster();
     renderLobby();
+    updateMpPresence();
     refreshVoice();
   } else if (data.t === "welcome") {
     if (data.id) mp.myId = data.id;
@@ -1140,6 +1188,7 @@ function handlePeerLeft(peerId) {
   }
   if (guessOpen) maybeRevealGuesses();
   renderLobby();
+  updateMpPresence();
   if (gone) setLobbyStatus(`${gone.name} left the room`);
 }
 
@@ -1183,6 +1232,8 @@ function closeRoom() {
   mp.talkers.clear();
   destroyVoice();
   updateVoiceUi();
+  setTabList(false);
+  el.mpOnline?.classList.add("hidden");
   disposeAllMates();
 }
 
@@ -2067,6 +2118,7 @@ function finishSnapStart() {
   hideMpWait();
   timerActive = mode !== "free";
   clearError();
+  updateMpPresence();
   setTimeout(clearStarting, 2500);
 }
 
@@ -2381,6 +2433,11 @@ el.gmRetry.addEventListener("click", () => {
 });
 
 window.addEventListener("keydown", (e) => {
+  if (e.key === "Tab" && mp.active && !menuOpen) {
+    e.preventDefault();
+    if (!e.repeat) setTabList(true);
+    return;
+  }
   if (e.key === "Escape") {
     if (!menuOpen && !guessOpen) setPaused(!paused);
     return;
@@ -2396,10 +2453,15 @@ window.addEventListener("keydown", (e) => {
   if (k === "r" && (crashed || finished)) restartMode();
 });
 window.addEventListener("keyup", (e) => {
+  if (e.key === "Tab") setTabList(false);
   if (e.target && e.target.tagName === "INPUT") return;
   const k = e.key.toLowerCase();
   if (k === "t") stopTalk();
   keys.delete(k);
+});
+el.mpOnline?.addEventListener("click", () => {
+  if (!mp.active || menuOpen) return;
+  setTabList(!tabListOpen);
 });
 window.addEventListener("blur", () => stopTalk());
 
