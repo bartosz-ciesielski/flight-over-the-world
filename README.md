@@ -59,7 +59,10 @@ cp .env.example .env
 1. Create an account at [ion.cesium.com](https://ion.cesium.com/).
 2. Create a token (Access tokens).
 3. In My Assets add **Google Photorealistic 3D Tiles** (asset `2275207`).
-4. Put the token in `.env` as `VITE_CESIUM_ION_KEY=…`
+4. Put one or more tokens in `.env` as `VITE_CESIUM_ION_KEYS=token1,token2,token3`.
+5. For production, set the same comma-separated list as the GitHub secret `VITE_CESIUM_ION_KEYS`.
+
+Use a separate Cesium ion account per token. On HTTP 429 the game keeps high tile quality and switches to the next key, then retries the tiles that failed. One key still works; more keys keep the map sharp under load.
 
 ```bash
 npm run dev

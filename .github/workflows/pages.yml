@@ -24,7 +24,9 @@ jobs:
       - run: npm run build
         env:
           VITE_CESIUM_ION_KEY: ${{ secrets.VITE_CESIUM_ION_KEY }}
+          VITE_CESIUM_ION_KEYS: ${{ secrets.VITE_CESIUM_ION_KEYS }}
           VITE_GOOGLE_MAPS_KEY: ${{ secrets.VITE_GOOGLE_MAPS_KEY }}
+          VITE_GOOGLE_TILES_KEYS: ${{ secrets.VITE_GOOGLE_TILES_KEYS }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

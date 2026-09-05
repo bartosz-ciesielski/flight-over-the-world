@@ -51,6 +51,12 @@ import {
 } from "./game/explosion.js";
 import { updateEngineSound, engineDebug } from "./game/engineSound.js";
 import { updateMusic, primeMusic, musicDebug, musicEnabled, setMusicEnabled } from "./game/music.js";
+import {
+  TileKeyPool,
+  loadTileSlots,
+  syncTileAuth,
+  applyTileQuality,
+} from "./game/tileAuth.js";
 
 // rakieta stoi pionowo (+Y) — połóż ją nosem do przodu (-Z, konwencja lotu)
 function prepareRocket(model) {
@@ -132,8 +138,9 @@ const GUESS_SCOPES = {
   },
 };
 
-const API_KEY = import.meta.env.VITE_GOOGLE_MAPS_KEY;
-const ION_KEY = import.meta.env.VITE_CESIUM_ION_KEY;
+const tilePool = new TileKeyPool(loadTileSlots());
+const ION_KEY = tilePool.firstIonToken;
+const API_KEY = tilePool.firstGoogleToken;
 const TERRAIN_ALT = 120; // przybliżona wysokość elipsoidalna nizin
 
 // Google wyłączyło Photorealistic 3D Tiles dla kont billingowych z EEA (403).
@@ -201,38 +208,46 @@ const HOME_BEACON_M = 1000;
 
 let camera, scene, renderer, tiles, sun, sky;
 let tileHoldUntil = 0;
-let tileHoldMs = 8000;
 let tile429Count = 0;
-let last429At = 0;
 let lastFailedRetryAt = 0;
 let lastTileErr = "";
 let pendingFailedRetry = false;
-const TILE_ERROR_TARGET = 10;
-const TILE_JOBS_OK = 10;
-const TILE_JOBS_SLOW = 4;
+let tileRotateBusy = false;
 
-function holdLoadedTiles() {
-  if (!tiles) return;
-  const now = performance.now();
-  // kolejne 429 w krótkim czasie = dłuższa przerwa, nie walenie w ten sam limit
-  if (last429At && now - last429At < 25000) {
-    tileHoldMs = Math.min(90000, Math.round(tileHoldMs * 1.8));
-  } else if (!last429At || now - last429At > 120000) {
-    tileHoldMs = 8000;
-  }
-  last429At = now;
+function onTileThrottle(status = 429) {
+  if (!tiles || tileRotateBusy) return;
+  tileRotateBusy = true;
   tile429Count += 1;
-  tileHoldUntil = now + tileHoldMs;
-  tiles.downloadQueue.maxJobsPerOrigin = 0;
+  lastTileErr = String(status);
   pendingFailedRetry = true;
+  tilePool
+    .rotate(status)
+    .then((switched) => {
+      syncTileAuth(tiles, tilePool);
+      applyTileQuality(tiles);
+      if (switched) {
+        tileHoldUntil = 0;
+        tiles.resetFailedTiles();
+        return;
+      }
+      // jeden klucz albo wszystkie w cooldown — krótka pauza, jakość bez zmian
+      tiles.downloadQueue.maxJobsPerOrigin = 0;
+      tileHoldUntil = performance.now() + 8000;
+    })
+    .catch((err) => {
+      lastTileErr = String(err?.message || err).slice(0, 220);
+      pendingFailedRetry = true;
+    })
+    .finally(() => {
+      tileRotateBusy = false;
+    });
 }
 
 function releaseTileHold() {
   if (!tiles || !tileHoldUntil) return;
   if (performance.now() < tileHoldUntil) return;
   tileHoldUntil = 0;
-  const recent = last429At && performance.now() - last429At < 120000;
-  tiles.downloadQueue.maxJobsPerOrigin = recent ? TILE_JOBS_SLOW : TILE_JOBS_OK;
+  applyTileQuality(tiles);
   retryFailedTiles(true);
 }
 
@@ -241,7 +256,7 @@ function retryFailedTiles(force = false) {
   const failed = tiles.stats?.failed || 0;
   if (!failed || (!force && !pendingFailedRetry)) return;
   const now = performance.now();
-  if (!force && now - lastFailedRetryAt < 20000) return;
+  if (!force && now - lastFailedRetryAt < 12000) return;
   lastFailedRetryAt = now;
   pendingFailedRetry = false;
   tiles.resetFailedTiles();
@@ -1888,8 +1903,8 @@ el.lobbyCity.addEventListener("input", () => {
 });
 
 function init() {
-  if (!ION_KEY && !API_KEY) {
-    setLoader("Missing map key – add VITE_CESIUM_ION_KEY to .env", 0);
+  if (!tilePool.slots.length) {
+    setLoader("Missing map keys – add VITE_CESIUM_ION_KEYS to .env", 0);
     return;
   }
   setLoader("Start…", 0.4);
@@ -1933,7 +1948,7 @@ function init() {
 
   tiles = new TilesRenderer();
   tiles.registerPlugin({
-    name: "TILE_HOLD_PLUGIN",
+    name: "TILE_KEY_POOL_PLUGIN",
     priority: -100,
     tiles: null,
     init(t) {
@@ -1942,24 +1957,41 @@ function init() {
     fetchData(url, options) {
       const g = this.tiles.getPluginByName("GOOGLE_CLOUD_AUTH_PLUGIN");
       if (g?.auth) g.auth.autoRefreshToken = false;
+      if (tilePool.current?.session) {
+        return tilePool.fetchData(url, options).then((res) => {
+          if (res && (res.status === 429 || res.status === 403)) onTileThrottle(res.status);
+          return res;
+        });
+      }
       if (g?.fetchData) return g.fetchData(url, options);
       const ion = this.tiles.getPluginByName("CESIUM_ION_AUTH_PLUGIN");
       if (ion?.auth) return ion.auth.fetch(url, options);
       return null;
     },
   });
-  if (ION_KEY) {
+  const startSlot = tilePool.current;
+  if (startSlot?.kind === "ion" || ION_KEY) {
     tiles.registerPlugin(
       new CesiumIonAuthPlugin({
-        apiToken: ION_KEY,
+        apiToken: startSlot?.kind === "ion" ? startSlot.token : ION_KEY,
         assetId: ION_GOOGLE_TILES_ASSET,
-        autoRefreshToken: true,
+        autoRefreshToken: false,
         useRecommendedSettings: false,
       })
     );
   } else {
-    tiles.registerPlugin(new GoogleCloudAuthPlugin({ apiToken: API_KEY, useRecommendedSettings: false }));
+    tiles.registerPlugin(
+      new GoogleCloudAuthPlugin({
+        apiToken: startSlot?.token || API_KEY,
+        useRecommendedSettings: false,
+      })
+    );
   }
+  tilePool.onSwitch = () => {
+    syncTileAuth(tiles, tilePool);
+    applyTileQuality(tiles);
+    tiles.resetFailedTiles();
+  };
   tiles.registerPlugin(new TileCompressionPlugin());
   tiles.registerPlugin(new UpdateOnChangePlugin());
   tiles.registerPlugin(new UnloadTilesPlugin());
@@ -1972,12 +2004,14 @@ function init() {
   scene.add(tiles.group);
   tiles.setResolutionFromRenderer(camera, renderer);
   tiles.setCamera(camera);
-  tiles.errorTarget = TILE_ERROR_TARGET;
-  tiles.downloadQueue.maxJobsPerOrigin = TILE_JOBS_OK;
-  tiles.lruCache.maxSize = 3000;
-  tiles.lruCache.maxBytesSize = 1.5e9;
+  applyTileQuality(tiles);
   tiles.addEventListener("load-tileset", () => {
-    tiles.errorTarget = TILE_ERROR_TARGET;
+    applyTileQuality(tiles);
+    tilePool.rememberPluginSession(
+      tiles.getPluginByName("GOOGLE_CLOUD_AUTH_PLUGIN"),
+      tiles.rootURL
+    );
+    syncTileAuth(tiles, tilePool);
   });
 
   // czytelny komunikat zamiast wiecznego ładowania
@@ -1985,18 +2019,19 @@ function init() {
     const msg = String(ev?.error?.message || ev?.error || "");
     lastTileErr = msg.slice(0, 220);
     pendingFailedRetry = true;
-    if (/429|403|502|503|quota|resource_exhausted|too many/i.test(msg)) holdLoadedTiles();
+    if (/429|403|502|503|quota|resource_exhausted|too many/i.test(msg)) {
+      const code = /403/.test(msg) ? 403 : 429;
+      onTileThrottle(code);
+    }
     if (!loaderDismissed) {
-      loadError = ION_KEY
-        ? "Cesium ion is not responding – check VITE_CESIUM_ION_KEY"
-        : "Google blocked 3D tiles for EEA accounts – add VITE_CESIUM_ION_KEY to .env";
+      loadError = tilePool.slots.length
+        ? "Map servers are busy – retrying on the next key"
+        : "Missing map keys – add VITE_CESIUM_ION_KEYS to .env";
     }
   });
   setTimeout(() => {
     if (!loaderDismissed && tiles.group.children.length === 0) {
-      loadError = ION_KEY
-        ? "The map is not loading… check VITE_CESIUM_ION_KEY"
-        : "Google disabled 3D tiles for EEA accounts – you need a free Cesium ion token (VITE_CESIUM_ION_KEY in .env)";
+      loadError = "The map is not loading… check VITE_CESIUM_ION_KEYS";
     }
   }, 20000);
 
@@ -3314,6 +3349,7 @@ function tickFrame() {
     tileHoldMs: tileHoldUntil ? Math.max(0, Math.round(tileHoldUntil - performance.now())) : 0,
     tileJobs: tiles.downloadQueue?.maxJobsPerOrigin ?? -1,
     tileErr: lastTileErr,
+    tilePool: tilePool.debug(),
     explosions: explosions.length,
     crashed,
     audio: engineDebug(),
