@@ -1727,37 +1727,22 @@ function init() {
   camera = new PerspectiveCamera(70, innerWidth / innerHeight, 0.5, 1e8);
 
   tiles = new TilesRenderer();
-  let tileRetryAt = 0;
+  let tileHoldUntil = 0;
+  let tileErrorTarget = 10;
   tiles.registerPlugin({
-    name: "TILE_RETRY_PLUGIN",
+    name: "TILE_HOLD_PLUGIN",
     priority: -100,
     tiles: null,
     init(t) {
       this.tiles = t;
     },
-    async fetchData(url, options) {
-      const fetchOnce = () => {
-        const g = this.tiles.getPluginByName("GOOGLE_CLOUD_AUTH_PLUGIN");
-        if (g?.auth) g.auth.autoRefreshToken = false;
-        if (g?.fetchData) return g.fetchData(url, options);
-        const ion = this.tiles.getPluginByName("CESIUM_ION_AUTH_PLUGIN");
-        if (ion?.auth) return ion.auth.fetch(url, options);
-        return fetch(url, options);
-      };
-      let last;
-      for (let i = 0; i < 5; i++) {
-        try {
-          last = await fetchOnce();
-          if (!(last instanceof Response) || last.ok || last.status !== 429) return last;
-        } catch (err) {
-          last = err;
-          if (!String(err?.message || "").includes("429")) throw err;
-        }
-        await new Promise((r) => setTimeout(r, Math.min(12000, 700 * 2 ** i)));
-        if (options?.signal?.aborted) break;
-      }
-      if (last instanceof Response) return last;
-      throw last;
+    fetchData(url, options) {
+      const g = this.tiles.getPluginByName("GOOGLE_CLOUD_AUTH_PLUGIN");
+      if (g?.auth) g.auth.autoRefreshToken = false;
+      if (g?.fetchData) return g.fetchData(url, options);
+      const ion = this.tiles.getPluginByName("CESIUM_ION_AUTH_PLUGIN");
+      if (ion?.auth) return ion.auth.fetch(url, options);
+      return null;
     },
   });
   if (ION_KEY) {
@@ -1783,22 +1768,28 @@ function init() {
   scene.add(tiles.group);
   tiles.setResolutionFromRenderer(camera, renderer);
   tiles.setCamera(camera);
-  tiles.errorTarget = 10;
+  tiles.errorTarget = tileErrorTarget;
   tiles.lruCache.maxSize = isMobile ? 1600 : 3000;
   tiles.lruCache.maxBytesSize = isMobile ? 2.8e8 : 1.5e9;
   if (isMobile) tiles.loadSiblings = false;
-  tiles.downloadQueue.maxJobsPerOrigin = 10;
+
+  const holdLoadedTiles = () => {
+    tileHoldUntil = performance.now() + 12000;
+    tiles.resetFailedTiles();
+    tiles.errorTarget = 1e6;
+    tiles.group.visible = !menuOpen;
+  };
+  const releaseTileHold = () => {
+    if (tileHoldUntil && performance.now() >= tileHoldUntil) {
+      tileHoldUntil = 0;
+      tiles.errorTarget = tileErrorTarget;
+    }
+  };
 
   // czytelny komunikat zamiast wiecznego ładowania
   tiles.addEventListener("load-error", (ev) => {
     const msg = String(ev?.error?.message || "");
-    if (msg.includes("429")) {
-      const when = performance.now();
-      if (when >= tileRetryAt) {
-        tileRetryAt = when + 4000;
-        setTimeout(() => tiles.resetFailedTiles(), 2500);
-      }
-    }
+    if (msg.includes("429") || msg.includes("error code 429")) holdLoadedTiles();
     if (!loaderDismissed) {
       loadError = ION_KEY
         ? "Cesium ion is not responding – check VITE_CESIUM_ION_KEY"
@@ -2947,6 +2938,7 @@ function tickFrame() {
       tiles.setResolutionFromRenderer(camera, renderer);
       tiles.setCamera(camera);
       camera.updateMatrixWorld();
+      releaseTileHold();
       tiles.update();
     }
   } else {
@@ -2955,6 +2947,7 @@ function tickFrame() {
     tiles.setResolutionFromRenderer(camera, renderer);
     tiles.setCamera(camera);
     camera.updateMatrixWorld();
+    releaseTileHold();
     tiles.update();
   }
 
