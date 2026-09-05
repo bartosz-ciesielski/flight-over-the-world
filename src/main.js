@@ -4,10 +4,8 @@ import {
   TilesRenderer,
 } from "3d-tiles-renderer";
 import {
-  TilesFadePlugin,
   UpdateOnChangePlugin,
   TileCompressionPlugin,
-  UnloadTilesPlugin,
   GLTFExtensionsPlugin,
   GoogleCloudAuthPlugin,
   CesiumIonAuthPlugin,
@@ -57,6 +55,7 @@ import {
   syncTileAuth,
   applyTileQuality,
 } from "./game/tileAuth.js";
+import { createHoldParentTilesPlugin } from "./game/holdParentTiles.js";
 
 // rakieta stoi pionowo (+Y) — połóż ją nosem do przodu (-Z, konwencja lotu)
 function prepareRocket(model) {
@@ -216,15 +215,8 @@ function onTileThrottle(status = 429) {
   tile429Count += 1;
   lastTileErr = String(status);
   pendingFailedRetry = true;
-  const ready = tilePool.debug().ready;
-  if (ready > 0) {
-    tileHoldUntil = 0;
-    applyTileQuality(tiles);
-    return;
-  }
-  if (tileHoldUntil && performance.now() < tileHoldUntil) return;
-  tiles.downloadQueue.maxJobsPerOrigin = 0;
-  tileHoldUntil = performance.now() + 8000;
+  tileHoldUntil = 0;
+  applyTileQuality(tiles);
 }
 
 function releaseTileHold() {
@@ -240,7 +232,7 @@ function retryFailedTiles(force = false) {
   const failed = tiles.stats?.failed || 0;
   if (!failed || (!force && !pendingFailedRetry)) return;
   const now = performance.now();
-  if (!force && now - lastFailedRetryAt < 12000) return;
+  if (!force && now - lastFailedRetryAt < 1500) return;
   lastFailedRetryAt = now;
   pendingFailedRetry = false;
   resetFailedTilesSafe();
@@ -2090,8 +2082,12 @@ async function init() {
   };
   tiles.registerPlugin(new TileCompressionPlugin());
   tiles.registerPlugin(new UpdateOnChangePlugin());
-  tiles.registerPlugin(new UnloadTilesPlugin());
-  tiles.registerPlugin(new TilesFadePlugin());
+  const holdParents = createHoldParentTilesPlugin();
+  tiles.registerPlugin(holdParents);
+  tiles.userData = tiles.userData || {};
+  tiles.userData.holdParents = holdParents;
+  // Fade-out of a parent before the child mesh exists reads as a white hole.
+  // Pop the swap instead: parent stays until HoldParentTiles releases it.
   const draco = new DRACOLoader();
   draco.setDecoderPath("https://www.gstatic.com/draco/versioned/decoders/1.5.7/");
   tiles.registerPlugin(new GLTFExtensionsPlugin({ dracoLoader: draco }));
@@ -3445,6 +3441,7 @@ function tickFrame() {
     tileHoldMs: tileHoldUntil ? Math.max(0, Math.round(tileHoldUntil - performance.now())) : 0,
     tileJobs: tiles.downloadQueue?.maxJobsPerOrigin ?? -1,
     tileErr: lastTileErr,
+    tileHeld: tiles.userData?.holdParents?.held?.size ?? 0,
     tilePool: tilePool.debug(),
     explosions: explosions.length,
     crashed,

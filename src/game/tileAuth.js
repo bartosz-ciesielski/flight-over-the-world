@@ -60,7 +60,7 @@ export function loadTileSlots() {
   ]);
   const google = unique([
     ...splitKeys(import.meta.env.VITE_GOOGLE_TILES_KEYS),
-    ...splitKeys(import.meta.env.VITE_GOOGLE_MAPS_KEY),
+    ...(ion.length ? [] : splitKeys(import.meta.env.VITE_GOOGLE_MAPS_KEY)),
   ]);
   return [
     ...ion.map((token) => ({ kind: "ion", token })),
@@ -194,18 +194,23 @@ export class TileKeyPool {
           this.markStatus(slot, 401);
           return null;
         }
-        const root = await fetch(rootUrl);
-        if (!root.ok) {
-          this.markStatus(slot, root.status);
+        const parsed = new URL(rootUrl);
+        const key = parsed.searchParams.get("key") || "";
+        let session = parsed.searchParams.get("session") || "";
+        try {
+          const root = await fetch(rootUrl);
+          if (root.ok) {
+            const tileset = await root.json();
+            session = extractSession(tileset) || session;
+          }
+        } catch {
+          /* ion already gave a usable key — do not kill the slot on a busy root.json */
+        }
+        if (!key) {
+          this.markStatus(slot, 401);
           return null;
         }
-        const tileset = await root.json();
-        const parsed = new URL(rootUrl);
-        slot.session = {
-          key: parsed.searchParams.get("key") || "",
-          session: extractSession(tileset) || parsed.searchParams.get("session") || "",
-          rootUrl,
-        };
+        slot.session = { key, session, rootUrl };
         slot.fails = 0;
         return slot.session;
       }
@@ -317,35 +322,34 @@ export class TileKeyPool {
         return new Response("", { status: 401, statusText: "No map key" });
       }
     }
-    let res;
-    try {
-      res = await fetch(this.applySessionToUrl(url), options);
-    } catch (err) {
-      return new Response("", { status: 599, statusText: String(err?.message || err) });
-    }
-    if (res.ok || (res.status !== 429 && res.status !== 401 && res.status !== 403)) {
-      return res;
-    }
-    if (res.status === 401 || res.status === 403) {
-      const slot = this.current;
-      if (slot) slot.session = null;
-      const refreshed = await this.ensureSession(slot);
-      if (refreshed) {
-        try {
-          const retry = await fetch(this.applySessionToUrl(url), options);
-          if (retry.ok) return retry;
-        } catch {
-          /* fall through to rotate */
-        }
+    let last = null;
+    for (let attempt = 0; attempt < 8; attempt++) {
+      if (options?.signal?.aborted) {
+        return last || new Response("", { status: 499, statusText: "Aborted" });
       }
+      try {
+        last = await fetch(this.applySessionToUrl(url), options);
+      } catch (err) {
+        last = new Response("", { status: 599, statusText: String(err?.message || err) });
+      }
+      if (last.ok) return last;
+      if (last.status === 429 || last.status === 502 || last.status === 503) {
+        this.lastErr = String(last.status);
+        // Stay LOADING so the parent tile is not dropped for a white hole.
+        await new Promise((r) => setTimeout(r, 350 * (attempt + 1)));
+        continue;
+      }
+      if (last.status === 401 || last.status === 403) {
+        const slot = this.current;
+        if (slot) slot.session = null;
+        const refreshed = await this.ensureSession(slot);
+        if (refreshed) continue;
+        const switched = await this.rotate(last.status);
+        if (switched) continue;
+      }
+      return last;
     }
-    const switched = await this.rotate(res.status);
-    if (!switched || !this.current?.session) return res;
-    try {
-      return await fetch(this.applySessionToUrl(url), options);
-    } catch {
-      return res;
-    }
+    return last || new Response("", { status: 429, statusText: "Tiles busy" });
   }
 }
 
@@ -372,7 +376,11 @@ export function syncTileAuth(tiles, pool) {
 export function applyTileQuality(tiles) {
   if (!tiles) return;
   tiles.errorTarget = TILE_QUALITY.errorTarget;
+  tiles.loadAncestors = true;
+  tiles.loadSiblings = true;
   tiles.downloadQueue.maxJobsPerOrigin = TILE_QUALITY.maxJobs;
   tiles.lruCache.maxSize = TILE_QUALITY.cacheTiles;
   tiles.lruCache.maxBytesSize = TILE_QUALITY.cacheBytes;
+  tiles.lruCache.minSize = 800;
+  tiles.lruCache.unloadPercent = 0.05;
 }
