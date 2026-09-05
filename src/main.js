@@ -564,8 +564,12 @@ function scopeLabel(scope = guessScope) {
   return "World";
 }
 
-function roomTitleFromParams(visibility = mp.visibility, scope = guessScope) {
-  return `${visibility === "private" ? "Private" : "Public"} · ${scopeLabel(scope)}`;
+function roomTitleFromParams(_visibility = mp.visibility, scope = guessScope) {
+  return `Guess the region: ${scopeLabel(scope)}`;
+}
+
+function playerCountLabel(n = 1 + mp.players.size) {
+  return `${n} player${n === 1 ? "" : "s"}`;
 }
 
 function syncRoomTitle() {
@@ -626,10 +630,11 @@ function renderRoomList() {
   }
   el.roomsList.innerHTML = live.map((r) => {
     const playing = r.playing ? " · in flight" : "";
+    const name = r.scopeLabel ? `Guess the region: ${r.scopeLabel}` : (r.title || "Guess the region");
     return `<div class="room-row">
       <div class="r-meta">
-        <span class="r-name">${escapeHtml(r.title || "Public room")}</span>
-        <span class="r-sub">${r.count || 1} player${r.count === 1 ? "" : "s"} · ${escapeHtml(r.scopeLabel || "Guess")}${playing}</span>
+        <span class="r-name">${escapeHtml(name)}</span>
+        <span class="r-sub">${playerCountLabel(r.count || 1)}${playing}</span>
       </div>
       <button type="button" data-join="${r.id}">Join</button>
     </div>`;
@@ -827,9 +832,7 @@ function renderLobby() {
   if (el.roomVis) el.roomVis.checked = mp.visibility === "private";
   el.lobbyVisSwitch?.classList.toggle("locked", !mp.host);
   if (el.lobbyTitle) el.lobbyTitle.textContent = roomTitleFromParams();
-  if (el.lobbyVis) {
-    el.lobbyVis.textContent = `${mp.visibility === "private" ? "Private" : "Public"} · Guess the region · ${scopeLabel()}`;
-  }
+  if (el.lobbyVis) el.lobbyVis.textContent = playerCountLabel();
 
   const queued = mp.waiting || (mp.roundActive && !mp.inRound);
   el.lobbyStart.disabled = queued || !mp.host || mp.roundActive || mp.launching;
