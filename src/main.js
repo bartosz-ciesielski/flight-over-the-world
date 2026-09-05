@@ -648,6 +648,7 @@ function escapeHtml(s) {
 }
 
 function showLanding() {
+  hostGen += 1;
   closeRoom();
   closeDirectory();
   mp.active = false;
@@ -663,6 +664,7 @@ function showLanding() {
 }
 
 function showRooms() {
+  hostGen += 1;
   closeRoom();
   mp.active = false;
   menuOpen = true;
@@ -674,6 +676,7 @@ function showRooms() {
   lobbyCarousel.setActive(false);
   rememberHost("");
   history.replaceState(null, "", location.pathname + location.search);
+  showCreatePanel(false);
   ensureDirectory();
   renderRoomList();
 }
@@ -821,6 +824,7 @@ function renderLobby() {
     el.lobbyCity.readOnly = true;
   }
   if (mp.roomId) el.lobbyLink.value = roomLink(mp.roomId);
+  document.querySelector(".lobby-link-row")?.classList.toggle("hidden", mp.visibility !== "private");
   if (el.lobbyTitle) el.lobbyTitle.textContent = roomTitleFromParams();
   if (el.lobbyVis) {
     const vis = mp.visibility === "private" ? "Private" : "Public";
@@ -892,15 +896,19 @@ function voiceTargets() {
   return ids;
 }
 
+function voiceEnabled() {
+  return mp.active && mp.visibility === "private" && !!mp.net;
+}
+
 function refreshVoice() {
-  if (!mp.active || !mp.net) return;
+  if (!voiceEnabled()) return;
   syncVoiceCalls(voiceTargets());
 }
 
 let wantTalk = false;
 
 async function startTalk() {
-  if (!mp.active) return;
+  if (!voiceEnabled()) return;
   wantTalk = true;
   if (isTalking()) return;
   unlockAudio();
@@ -928,7 +936,7 @@ function stopTalk() {
 function updateVoiceUi() {
   const box = el.voiceInd;
   if (!box) return;
-  if (!mp.active || !mp.net) {
+  if (!voiceEnabled()) {
     box.classList.add("hidden");
     return;
   }
@@ -949,7 +957,7 @@ function updateVoiceUi() {
 }
 
 async function handleVoiceCall(call) {
-  if (!call) return;
+  if (!call || !voiceEnabled()) return;
   await ensureMic();
   answerCall(call);
   refreshVoice();
@@ -1145,7 +1153,9 @@ function handleNetError(err) {
     openGuestLobby(mp.roomId);
     return;
   }
-  const msg = err?.type === "peer-unavailable"
+  const msg = err?.type === "timeout"
+    ? "Could not open the room – try again in a moment"
+    : err?.type === "peer-unavailable"
     ? "Host not found – they should open Multiplayer and not refresh, then open the link again"
     : err?.type === "unavailable-id"
       ? "This room is taken – joining as a guest…"
@@ -1180,7 +1190,10 @@ function closeRoom() {
   disposeAllMates();
 }
 
+let hostGen = 0;
+
 function openHostLobby(existingId, opts = {}) {
+  const gen = ++hostGen;
   closeDirectory();
   closeRoom();
   mp.active = true;
@@ -1192,36 +1205,38 @@ function openHostLobby(existingId, opts = {}) {
   selectLobbyMode("guess");
   showLobby();
   setLobbyStatus("Creating room…");
-  const api = hostRoom({
-    onOpen(id) {
-      mp.roomId = id;
-      mp.myId = id;
-      rememberHost(id);
-      history.replaceState(null, "", `#r=${id}`);
-      el.lobbyLink.value = roomLink(id);
-      publishRoom();
-      renderLobby();
-      setLobbyStatus(
-        mp.visibility === "private"
-          ? `Private room ready — share the code ${id}`
-          : "Public room is live — friends can join from the room list"
-      );
-    },
-    onPeer: handlePeerJoined,
-    onData: handleNetData,
-    onCall: handleVoiceCall,
-    onLeft: handlePeerLeft,
-    onError: handleNetError,
-  }, existingId);
-  attachNet(api);
-  setTimeout(() => {
-    if (mp.host && mp.active && !mp.myId) {
-      setLobbyStatus("Could not open the room – try again in a moment", true);
-    }
-  }, 12000);
+  const boot = () => {
+    if (gen !== hostGen) return;
+    const api = hostRoom({
+      onOpen(id) {
+        if (gen !== hostGen) return;
+        mp.roomId = id;
+        mp.myId = id;
+        rememberHost(id);
+        if (mp.visibility === "private") history.replaceState(null, "", `#r=${id}`);
+        else history.replaceState(null, "", location.pathname + location.search);
+        el.lobbyLink.value = roomLink(id);
+        publishRoom();
+        renderLobby();
+        setLobbyStatus(
+          mp.visibility === "private"
+            ? `Private room ready — share the code ${id}`
+            : "Public room is live — friends can join from the list"
+        );
+      },
+      onPeer: handlePeerJoined,
+      onData: handleNetData,
+      onCall: handleVoiceCall,
+      onLeft: handlePeerLeft,
+      onError: handleNetError,
+    }, existingId);
+    attachNet(api);
+  };
+  setTimeout(boot, 450);
 }
 
 function openGuestLobby(id) {
+  hostGen += 1;
   closeDirectory();
   closeRoom();
   mp.active = true;
@@ -2375,7 +2390,7 @@ window.addEventListener("keydown", (e) => {
   }
   if (e.target && e.target.tagName === "INPUT") return;
   const k = e.key.toLowerCase();
-  if (k === "t" && mp.active) {
+  if (k === "t" && voiceEnabled()) {
     if (!e.repeat) startTalk();
     return;
   }
@@ -2468,7 +2483,7 @@ function syncTouchUi() {
   const show = !menuOpen && !paused && !guessOpen && !crashed && !finished;
   el.touch.classList.toggle("hidden", !show);
   el.touch.classList.toggle("show", show);
-  el.touch.classList.toggle("talk", !!(mp.active && mp.net));
+  el.touch.classList.toggle("talk", voiceEnabled());
   if (!show) {
     resetStick();
     touch.boost = false;

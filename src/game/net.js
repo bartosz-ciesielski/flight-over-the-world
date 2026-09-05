@@ -69,9 +69,12 @@ export function rememberHost(id) {
 }
 
 export function hostRoom(handlers, existingId) {
-  const id = existingId || roomId();
-  const peer = makePeer(id);
   const conns = new Map();
+  let peer = null;
+  let id = existingId || "";
+  let dead = false;
+  let opened = false;
+  let attempt = 0;
 
   function each(fn, exceptId) {
     for (const [pid, c] of conns) {
@@ -94,6 +97,48 @@ export function hostRoom(handlers, existingId) {
     if (c.open) ready();
   }
 
+  function dropPeer() {
+    try {
+      peer?.destroy();
+    } catch {
+      /* ignore */
+    }
+    peer = null;
+  }
+
+  function start(preferId) {
+    if (dead || opened) return;
+    attempt += 1;
+    dropPeer();
+    peer = preferId ? makePeer(preferId) : new Peer(PEER_OPTS);
+    const watchdog = setTimeout(() => {
+      if (dead || opened) return;
+      if (attempt < 3) start(null);
+      else handlers.onError?.({ type: "timeout" });
+    }, 5000);
+    peer.on("open", (openId) => {
+      if (dead || opened) return;
+      opened = true;
+      clearTimeout(watchdog);
+      id = openId;
+      api.id = openId;
+      api.myPeerId = openId;
+      rememberHost(openId);
+      handlers.onOpen?.(openId);
+    });
+    peer.on("error", (err) => {
+      if (dead || opened) return;
+      clearTimeout(watchdog);
+      if ((err?.type === "unavailable-id" || err?.type === "network") && attempt < 3) {
+        start(null);
+        return;
+      }
+      handlers.onError?.(err);
+    });
+    peer.on("connection", attach);
+    peer.on("call", (call) => handlers.onCall?.(call));
+  }
+
   const api = {
     id,
     host: true,
@@ -109,7 +154,7 @@ export function hostRoom(handlers, existingId) {
       each((c) => c.send(data), peerId);
     },
     connect(peerId) {
-      if (!peerId) return null;
+      if (!peerId || !peer) return null;
       try {
         return peer.connect(peerId, CONNECT_OPTS);
       } catch {
@@ -117,7 +162,7 @@ export function hostRoom(handlers, existingId) {
       }
     },
     call(peerId, stream) {
-      if (!peerId || !stream) return null;
+      if (!peerId || !stream || !peer) return null;
       try {
         return peer.call(peerId, stream);
       } catch {
@@ -125,20 +170,14 @@ export function hostRoom(handlers, existingId) {
       }
     },
     destroy() {
+      dead = true;
       for (const c of conns.values()) c.close();
       conns.clear();
-      peer.destroy();
+      dropPeer();
     },
   };
 
-  peer.on("open", () => {
-    rememberHost(id);
-    handlers.onOpen?.(id);
-  });
-  peer.on("error", (err) => handlers.onError?.(err));
-  peer.on("connection", attach);
-  peer.on("call", (call) => handlers.onCall?.(call));
-
+  start(existingId || roomId());
   return api;
 }
 

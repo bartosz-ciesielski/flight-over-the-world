@@ -219,7 +219,7 @@ export function connectDirectory(onRooms) {
   }
 
   joinHost();
-  setTimeout(() => {
+  const claimTimer = setTimeout(() => {
     if (!destroyed && !isHost && !remote?.open && rooms.size === 0) becomeHost();
   }, 2500);
 
@@ -241,6 +241,7 @@ export function connectDirectory(onRooms) {
     destroy() {
       destroyed = true;
       clearTimeout(retryTimer);
+      clearTimeout(claimTimer);
       clearInterval(sweepTimer);
       cleanupPeer();
     },

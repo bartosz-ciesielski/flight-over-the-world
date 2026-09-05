@@ -448,12 +448,11 @@ kbd {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin: -6px 0 18px;
+  margin: 0 0 18px;
 }
 
-.rooms-head .landing-sub {
+.rooms-head h1 {
   margin: 0;
-  text-align: left;
 }
 
 #btn-create-room {
@@ -793,6 +792,8 @@ kbd {
   gap: 10px;
   margin-bottom: 12px;
 }
+
+.lobby-link-row.hidden { display: none; }
 
 #lobby-link {
   flex: 1;
