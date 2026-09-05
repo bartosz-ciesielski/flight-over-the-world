@@ -231,6 +231,25 @@ const MATE_MARKER_MS = 10000;
 const MATE_INTERP_MS = 130;
 const MATE_SEND_MS = 40;
 const PLAYER_COLORS = ["#7ec8e3", "#e37e7e", "#9dce6a", "#d4a5f5", "#f0c36e", "#6ec8c1"];
+const NAME_ADJ = ["Szybki", "Cichy", "Rudy", "Nocny", "Dziki", "Biały", "Złoty", "Lotny", "Ostry", "Chmurny", "Bystry", "Śmiały"];
+const NAME_NOUN = ["Orzeł", "Sokół", "Wilk", "Lis", "Jastrząb", "Ryś", "Kruk", "Borsuk", "Komar", "Jeleń", "Puma", "Rekin"];
+
+function randomUsername() {
+  const a = NAME_ADJ[Math.floor(Math.random() * NAME_ADJ.length)];
+  const n = NAME_NOUN[Math.floor(Math.random() * NAME_NOUN.length)];
+  const num = Math.floor(Math.random() * 90) + 10;
+  return `${a} ${n} ${num}`;
+}
+
+function uniquePlayerName(base) {
+  const taken = new Set([mp.myName, ...[...mp.players.values()].map((p) => p.name)].filter(Boolean));
+  if (base && !taken.has(base)) return base;
+  for (let i = 0; i < 20; i++) {
+    const next = randomUsername();
+    if (!taken.has(next)) return next;
+  }
+  return `${base || randomUsername()} ${Math.floor(Math.random() * 90) + 10}`;
+}
 
 const mp = {
   active: false,
@@ -692,7 +711,7 @@ function handleNetData(data, fromId) {
   if (data.t === "hello") {
     if (!mp.host || !fromId) return;
     const waiting = mp.roundActive;
-    const name = `Gość ${mp.players.size + 1}`;
+    const name = uniquePlayerName(data.name);
     mp.players.set(fromId, {
       id: fromId,
       name,
@@ -923,7 +942,7 @@ function openGuestLobby(id) {
   closeRoom();
   mp.active = true;
   mp.host = false;
-  mp.myName = "Gość";
+  mp.myName = randomUsername();
   mp.roomId = id;
   showLobby();
   el.lobbyLink.value = roomLink(id);
