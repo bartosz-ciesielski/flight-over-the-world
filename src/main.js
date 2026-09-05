@@ -229,7 +229,7 @@ function lastError() {
 function clearError() {
   try { sessionStorage.removeItem(LAST_ERR); } catch { /* ignore */ }
 }
-const liteMode = isMobile || crashedLastStart();
+const liteMode = isMobile;
 if (liteMode) document.body.classList.add("lite");
 let loadError = null;
 let frameCount = 0;
@@ -1469,24 +1469,24 @@ function init() {
   scene.fog = new FogExp2(0x9dd0ea, 0.00007);
 
   renderer = new WebGLRenderer({
-    antialias: !liteMode,
-    powerPreference: liteMode ? "low-power" : "high-performance",
+    antialias: !isMobile,
+    powerPreference: "high-performance",
     alpha: false,
   });
   renderer.setClearColor(0x8ec8e8);
   applyPixelRatio();
   renderer.setSize(innerWidth, innerHeight);
-  renderer.toneMapping = liteMode ? 0 : 4; // NoToneMapping on phones
+  renderer.toneMapping = 4;
   renderer.toneMappingExposure = 1.1;
-  renderer.shadowMap.enabled = !liteMode;
+  renderer.shadowMap.enabled = !isMobile;
   renderer.shadowMap.type = 2; // PCFSoft
   renderer.domElement.id = "game-canvas";
   document.body.appendChild(renderer.domElement);
 
   scene.add(new HemisphereLight(0xbfd8ee, 0x5a7048, 1.15));
   sun = new DirectionalLight(0xfff2dd, 2.0);
-  sun.castShadow = !liteMode;
-  sun.shadow.mapSize.set(liteMode ? 512 : 2048, liteMode ? 512 : 2048);
+  sun.castShadow = !isMobile;
+  sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.camera.near = 1;
   sun.shadow.camera.far = 2500;
   sun.shadow.camera.left = -450;
@@ -1515,7 +1515,7 @@ function init() {
   tiles.registerPlugin(new TileCompressionPlugin());
   tiles.registerPlugin(new UpdateOnChangePlugin());
   tiles.registerPlugin(new UnloadTilesPlugin());
-  if (!liteMode) tiles.registerPlugin(new TilesFadePlugin());
+  tiles.registerPlugin(new TilesFadePlugin());
   const draco = new DRACOLoader();
   draco.setDecoderPath("https://www.gstatic.com/draco/versioned/decoders/1.5.7/");
   tiles.registerPlugin(new GLTFExtensionsPlugin({ dracoLoader: draco }));
@@ -1524,9 +1524,10 @@ function init() {
   scene.add(tiles.group);
   tiles.setResolutionFromRenderer(camera, renderer);
   tiles.setCamera(camera);
-  tiles.errorTarget = liteMode ? 36 : 10;
-  tiles.lruCache.maxSize = liteMode ? 160 : 3000;
-  tiles.lruCache.maxBytesSize = liteMode ? 3.2e7 : 1.5e9;
+  tiles.errorTarget = 10;
+  tiles.lruCache.maxSize = isMobile ? 1600 : 3000;
+  tiles.lruCache.maxBytesSize = isMobile ? 2.8e8 : 1.5e9;
+  if (isMobile) tiles.loadSiblings = false;
 
   // czytelny komunikat zamiast wiecznego ładowania
   tiles.addEventListener("load-error", () => {
@@ -1546,10 +1547,10 @@ function init() {
 
   // niebo — proceduralna kopuła (gradient + słońce + chmury FBM),
   // horyzont = dokładnie kolor mgły, więc nie ma przerwy ani poświaty
-  sky = createSky(0x9dd0ea, { simple: liteMode });
+  sky = createSky(0x9dd0ea);
   scene.add(sky.mesh);
 
-  if (!liteMode) {
+  if (!isMobile) {
     new TextureLoader().load(asset("textures/sky_day.jpg"), (tex) => {
       tex.mapping = EquirectangularReflectionMapping;
       tex.colorSpace = SRGBColorSpace;
@@ -1561,13 +1562,7 @@ function init() {
   beacon.visible = false;
   scene.add(beacon);
 
-  if (!liteMode) loadPlane(selectedPlane);
-  else {
-    planeMesh = createPlaneMesh();
-    planeMesh.userData.key = "";
-    planeMesh.visible = false;
-    scene.add(planeMesh);
-  }
+  loadPlane(selectedPlane);
   resetFlight(startLat, startLon);
   if (planeMesh) planeMesh.visible = false;
   loaderDismissed = true;
@@ -1598,7 +1593,6 @@ function loadPlane(key) {
   planeMesh = createPlaneMesh(); // fallback na czas ładowania
   planeMesh.userData.key = key;
   scene.add(planeMesh);
-  if (liteMode) return;
 
   new GLTFLoader().load(spec.file, (gltf) => {
     const model = gltf.scene;
@@ -1725,7 +1719,7 @@ function resetFlight(latDeg, lonDeg) {
 
 function applyPixelRatio() {
   if (!renderer) return;
-  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, liteMode ? 1 : 2));
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
 }
 
 function onResize() {
@@ -1873,8 +1867,8 @@ function sleepPreviews() {
 function beginFlight(lat, lon) {
   markStarting();
   sleepPreviews();
-  el.menuError.textContent = liteMode ? "Loading terrain (light mode)…" : "Loading terrain…";
-  if (!liteMode && selectedPlane !== planeMesh?.userData?.key) loadPlane(selectedPlane);
+  el.menuError.textContent = "Loading terrain…";
+  if (selectedPlane !== planeMesh?.userData?.key) loadPlane(selectedPlane);
   resetFlight(lat, lon);
   el.timerBox.classList.toggle("show", mode !== "free");
   el.distBox.classList.remove("show");
