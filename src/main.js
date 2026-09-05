@@ -66,20 +66,25 @@ import {
   distanceM,
   offsetPoint,
   createBeacon,
-  loadPolandGeo,
-  randomPointInPoland,
   pickGuessStart,
   drawPolandMap,
-  unprojectPL,
-  loadEuropeGeo,
-  randomPointInEurope,
+  loadCountryGeo,
+  loadContinentGeo,
+  unprojectCountry,
+  unprojectContinent,
   drawEuropeMap,
-  unprojectEU,
   loadWorldGeo,
   randomPointInWorld,
   drawWorldMap,
   unprojectWorld,
 } from "./game/modes.js";
+import {
+  detectLocale,
+  getRegionPack,
+  setRegionPack,
+  regionPayload,
+  guessHoldAlt,
+} from "./game/regions.js";
 import {
   parseRoomFromUrl,
   roomLink,
@@ -103,18 +108,18 @@ import {
 // zakresy trybu "Zgadnij region"
 const GUESS_SCOPES = {
   pl: {
-    load: loadPolandGeo,
+    load: loadCountryGeo,
     random: randomPointInPoland,
     draw: drawPolandMap,
-    unproject: unprojectPL,
+    unproject: unprojectCountry,
     sub: "Click a point on the map of Poland",
     status: "Picking a point in Poland…",
   },
   eu: {
-    load: loadEuropeGeo,
+    load: loadContinentGeo,
     random: randomPointInEurope,
     draw: drawEuropeMap,
-    unproject: unprojectEU,
+    unproject: unprojectContinent,
     sub: "Click a point on the map of Europe",
     status: "Picking a point in Europe…",
   },
@@ -467,6 +472,29 @@ document.querySelectorAll("#menu .scope-btn").forEach((btn) => {
   });
 });
 selectMode("guess");
+detectLocale();
+applyRegionLabels();
+
+function applyRegionLabels() {
+  const { country, continent } = getRegionPack();
+  document.querySelectorAll('[data-scope="pl"]').forEach((b) => {
+    b.textContent = `${country.flag} ${country.name}`;
+  });
+  document.querySelectorAll('[data-scope="eu"]').forEach((b) => {
+    b.textContent = `${continent.flag} ${continent.name}`;
+  });
+  GUESS_SCOPES.pl.sub = `Click a point on the map of ${country.name}`;
+  GUESS_SCOPES.pl.status = `Picking a point in ${country.name}…`;
+  GUESS_SCOPES.eu.sub = `Click a point on the map of ${continent.name}`;
+  GUESS_SCOPES.eu.status = `Picking a point in ${continent.name}…`;
+}
+
+function applyRemoteRegion(data) {
+  if (!data || (!data.country && !data.continent)) return;
+  setRegionPack(data.country, data.continent);
+  geoCache = null;
+  applyRegionLabels();
+}
 
 function showFatal(msg) {
   const text = msg || "Could not start on this phone.";
@@ -625,6 +653,7 @@ function broadcastRoster() {
     mode,
     scope: guessScope,
     city: el.lobbyCity.value,
+    ...regionPayload(),
   });
 }
 
@@ -701,7 +730,7 @@ function selectLobbyMode(m, broadcast = false) {
   if (broadcast && mp.host && mp.net) {
     mp.myReady = false;
     for (const p of mp.players.values()) p.ready = false;
-    mp.net.send({ t: "mode", mode: m, city: el.lobbyCity.value, scope: guessScope });
+    mp.net.send({ t: "mode", mode: m, city: el.lobbyCity.value, scope: guessScope, ...regionPayload() });
     broadcastRoster();
   }
   renderLobby();
@@ -811,6 +840,7 @@ function handleNetData(data, fromId) {
       mode,
       scope: guessScope,
       city: el.lobbyCity.value,
+      ...regionPayload(),
     });
     broadcastRoster();
     renderLobby();
@@ -820,6 +850,7 @@ function handleNetData(data, fromId) {
     if (data.name) mp.myName = data.name;
     mp.roundActive = !!data.roundActive;
     mp.waiting = !!data.roundActive;
+    applyRemoteRegion(data);
     if (data.scope) setLobbyScope(data.scope);
     if (data.mode) selectLobbyMode(data.mode);
     if (data.city != null) el.lobbyCity.value = data.city;
@@ -829,6 +860,7 @@ function handleNetData(data, fromId) {
     refreshVoice();
   } else if (data.t === "roster") {
     mp.roundActive = !!data.roundActive;
+    applyRemoteRegion(data);
     if (data.scope) setLobbyScope(data.scope);
     if (data.mode) selectLobbyMode(data.mode);
     if (data.city != null) el.lobbyCity.value = data.city;
@@ -837,8 +869,10 @@ function handleNetData(data, fromId) {
     renderLobby();
     refreshVoice();
   } else if (data.t === "scope") {
+    applyRemoteRegion(data);
     setLobbyScope(data.scope);
   } else if (data.t === "mode") {
+    applyRemoteRegion(data);
     if (data.scope) setLobbyScope(data.scope);
     if (data.city != null) el.lobbyCity.value = data.city;
     mp.myReady = false;
@@ -886,6 +920,7 @@ function handleNetData(data, fromId) {
       renderLobby();
       return;
     }
+    applyRemoteRegion(data);
     startMpFlight(data);
   } else if (data.t === "pose") {
     const id = data.from;
@@ -1063,7 +1098,7 @@ async function launchMpRound() {
       const scope = GUESS_SCOPES[guessScope];
       setLobbyStatus(scope.status);
       const p = pickGuessStart(guessScope);
-      const msg = { t: "start", mode, lat: p.lat, lon: p.lon, scope: guessScope, seats: buildSeats() };
+      const msg = { t: "start", mode, lat: p.lat, lon: p.lon, scope: guessScope, seats: buildSeats(), ...regionPayload() };
       mp.net?.send(msg);
       startMpFlight(msg);
     } else if (mode === "home") {
@@ -1289,7 +1324,7 @@ function snapAgl() {
 }
 
 function spawnHoldAlt() {
-  if (mode === "guess") return guessScope === "pl" ? 3000 : 9500;
+  if (mode === "guess") return guessHoldAlt(guessScope);
   return 6000;
 }
 
@@ -1439,7 +1474,7 @@ function setLobbyScope(scope, broadcast = false) {
   document.querySelectorAll("#lobby-scopes .scope-btn").forEach((b) =>
     b.classList.toggle("selected", b.dataset.scope === scope)
   );
-  if (broadcast && mp.host && mp.net) mp.net.send({ t: "scope", scope });
+  if (broadcast && mp.host && mp.net) mp.net.send({ t: "scope", scope, ...regionPayload() });
 }
 document.querySelectorAll("#lobby-scopes .scope-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
@@ -1701,7 +1736,7 @@ function resetFlight(latDeg, lonDeg) {
   startLon = lonDeg;
   // wysoki spawn poza nizinną Polską, żeby nie trafić w góry zanim teren się zmierzy
   // (menu i tak zostaje do czasu dosadzenia — spawn jest niewidoczny)
-  const spawnAlt = mode === "guess" ? (guessScope === "pl" ? 3000 : 9500) : 6000;
+  const spawnAlt = mode === "guess" ? guessHoldAlt(guessScope) : 6000;
   plane = new PlaneController(latDeg, lonDeg, spawnAlt, 0, spec);
   groundAlt = TERRAIN_ALT;
   pendingSnap = true; // udany, ustabilizowany pomiar terenu dosadzi samolot na właściwą wysokość

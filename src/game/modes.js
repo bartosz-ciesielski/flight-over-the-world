@@ -7,6 +7,7 @@ import {
   MathUtils,
 } from "three";
 import { asset } from "./asset.js";
+import { getRegionPack, pickContinentStart, pickCountryStart } from "./regions.js";
 
 const R_EARTH = 6378137;
 
@@ -178,9 +179,45 @@ const GUESS_SPAWNS = {
 };
 
 export function pickGuessStart(scope) {
-  const list = GUESS_SPAWNS[scope] || GUESS_SPAWNS.pl;
+  if (scope === "pl") return pickCountryStart();
+  if (scope === "eu") return pickContinentStart();
+  const list = GUESS_SPAWNS.world;
   const [lat, lon] = list[Math.floor(Math.random() * list.length)];
   return { lat, lon };
+}
+
+export function makeBBoxProject(bbox) {
+  const [lon0, lat0, lon1, lat1] = bbox;
+  const cos = Math.cos(((lat0 + lat1) / 2) * MathUtils.DEG2RAD);
+  return {
+    project(lon, lat, w, h, pad = 10) {
+      const sx = (w - 2 * pad) / ((lon1 - lon0) * cos);
+      const sy = (h - 2 * pad) / (lat1 - lat0);
+      const s = Math.min(sx, sy);
+      const dw = (lon1 - lon0) * cos * s;
+      const dh = (lat1 - lat0) * s;
+      const ox = (w - dw) / 2;
+      const oy = (h - dh) / 2;
+      return [ox + (lon - lon0) * cos * s, oy + (lat1 - lat) * s];
+    },
+    unproject(x, y, w, h, pad = 10) {
+      const sx = (w - 2 * pad) / ((lon1 - lon0) * cos);
+      const sy = (h - 2 * pad) / (lat1 - lat0);
+      const s = Math.min(sx, sy);
+      const dw = (lon1 - lon0) * cos * s;
+      const dh = (lat1 - lat0) * s;
+      const ox = (w - dw) / 2;
+      const oy = (h - dh) / 2;
+      return {
+        lon: lon0 + (x - ox) / (cos * s),
+        lat: lat1 - (y - oy) / s,
+      };
+    },
+  };
+}
+
+export function drawBBoxMap(canvas, geo, marks, bbox) {
+  drawGeoMap(canvas, geo, marks, makeBBoxProject(bbox).project);
 }
 
 // --- mapka świata do zgadywania (ekwiprostokątna, bez skrajnych stref) ---
@@ -264,6 +301,26 @@ export function unprojectEU(x, y, w, h, pad = 10) {
   };
 }
 
+export function loadCountryGeo() {
+  return getRegionPack().countryCode === "PL" ? loadPolandGeo() : loadWorldGeo();
+}
+
+export function loadContinentGeo() {
+  return getRegionPack().continentId === "europe" ? loadEuropeGeo() : loadWorldGeo();
+}
+
+export function unprojectCountry(x, y, w, h) {
+  const pack = getRegionPack();
+  if (pack.countryCode === "PL") return unprojectPL(x, y, w, h);
+  return makeBBoxProject(pack.country.bbox).unproject(x, y, w, h);
+}
+
+export function unprojectContinent(x, y, w, h) {
+  const pack = getRegionPack();
+  if (pack.continentId === "europe") return unprojectEU(x, y, w, h);
+  return makeBBoxProject(pack.continent.bbox).unproject(x, y, w, h);
+}
+
 // --- generyczne rysowanie mapy ---
 
 function drawGeoMap(canvas, geo, marks, project) {
@@ -331,11 +388,21 @@ function drawGeoMap(canvas, geo, marks, project) {
 }
 
 export function drawPolandMap(canvas, geo, marks = []) {
-  drawGeoMap(canvas, geo, marks, projectPL);
+  const pack = getRegionPack();
+  if (pack.countryCode === "PL") {
+    drawGeoMap(canvas, geo, marks, projectPL);
+    return;
+  }
+  drawBBoxMap(canvas, geo, marks, pack.country.bbox);
 }
 
 export function drawEuropeMap(canvas, geo, marks = []) {
-  drawGeoMap(canvas, geo, marks, projectEU);
+  const pack = getRegionPack();
+  if (pack.continentId === "europe") {
+    drawGeoMap(canvas, geo, marks, projectEU);
+    return;
+  }
+  drawBBoxMap(canvas, geo, marks, pack.continent.bbox);
 }
 
 export function drawWorldMap(canvas, geo, marks = []) {
