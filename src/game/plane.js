@@ -160,21 +160,23 @@ export class PlaneController {
     this.brake = spec.brake ?? 30;
     this.speed = this.cruise; // m/s
     const span = Math.max(1, this.boost - this.brake);
-    this.throttle = Math.max(0, Math.min(1, (this.cruise - this.brake) / span));
+    this.cruiseT = Math.max(0, Math.min(1, (this.cruise - this.brake) / span));
+    this.throttle = this.cruiseT;
     this.crashed = false;
   }
 
   update(dt, ctrl) {
-    // ctrl: roll -1..1 (prawo +), pitch -1..1 (w górę +), throttle -1..1 (dźwignia)
+    // ctrl: roll -1..1, pitch -1..1, throttle -1..1 tylko dopóki klawisz wciśnięty
     const targetRoll = -ctrl.roll * 0.9;
     const targetPitch = ctrl.pitch * 0.4;
     this.roll += (targetRoll - this.roll) * Math.min(1, 6 * dt);
     this.pitch += (targetPitch - this.pitch) * Math.min(1, 4 * dt);
 
-    if (ctrl.throttle > 0) this.throttle = Math.min(1, this.throttle + 0.3 * dt);
-    else if (ctrl.throttle < 0) this.throttle = Math.max(0, this.throttle - 0.3 * dt);
+    const hold = ctrl.throttle > 0 ? 1 : ctrl.throttle < 0 ? 0 : this.cruiseT;
+    const rate = ctrl.throttle !== 0 ? 0.55 : 1.7;
+    this.throttle += (hold - this.throttle) * Math.min(1, rate * dt);
     const targetSpeed = this.brake + this.throttle * (this.boost - this.brake);
-    this.speed += (targetSpeed - this.speed) * Math.min(1, 1.15 * dt);
+    this.speed += (targetSpeed - this.speed) * Math.min(1, 2.2 * dt);
 
     // zakręt przez przechylenie
     this.heading += -Math.sin(this.roll) * (this.speed / 55) * dt * 0.85;
