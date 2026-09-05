@@ -1,10 +1,6 @@
 # Lot nad światem
 
-Lot nad fotorealistyczną Ziemią — zgadnij region, doleć do domu albo po prostu lataj. Single player i multiplayer z rozmową na **T**.
-
-<p align="center">
-  <a href="https://bartosz-ciesielski.github.io/lot-nad-swiatem/"><strong>Graj w przeglądarce →</strong></a>
-</p>
+Lot nad fotorealistyczną Ziemią — zgadnij region, doleć do domu albo po prostu lataj. Single player i multiplayer.
 
 ![Lot nad polami](docs/screens/04-lot.png)
 
