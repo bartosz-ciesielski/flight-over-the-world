@@ -4,6 +4,7 @@ import {
   TilesRenderer,
 } from "3d-tiles-renderer";
 import {
+  TilesFadePlugin,
   UpdateOnChangePlugin,
   TileCompressionPlugin,
   GLTFExtensionsPlugin,
@@ -2122,8 +2123,13 @@ async function init() {
   tiles.registerPlugin(holdParents);
   tiles.userData = tiles.userData || {};
   tiles.userData.holdParents = holdParents;
-  // Fade-out of a parent before the child mesh exists reads as a white hole.
-  // Pop the swap instead: parent stays until HoldParentTiles releases it.
+  // Fade only after HoldParentTiles says the child mesh exists, so the
+  // swap is a crossfade instead of a pop or a hole to the sky.
+  tiles.registerPlugin(new TilesFadePlugin({
+    fadeDuration: 280,
+    fadeRootTiles: false,
+    maximumFadeOutTiles: 50,
+  }));
   const draco = new DRACOLoader();
   draco.setDecoderPath("https://www.gstatic.com/draco/versioned/decoders/1.5.7/");
   tiles.registerPlugin(new GLTFExtensionsPlugin({ dracoLoader: draco }));
