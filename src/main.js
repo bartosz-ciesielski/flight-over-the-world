@@ -190,6 +190,7 @@ const PLANE_ORDER = ["pa28", "q400", "citation", "jet", "rocket"];
 const HOME_TIME = 600; // 10 min na dolot do domu
 const GUESS_TIME = 60; // 1 min na rozpoznanie terenu
 const HOME_CAPTURE_M = 600;
+const HOME_BEACON_M = 1000;
 
 let camera, scene, renderer, tiles, sun, sky;
 let planeMesh, plane, beacon;
@@ -1732,7 +1733,6 @@ function placeBeaconAt(latDeg, lonDeg) {
   beaconGrounded = gh !== null;
   const m = frameAt(latDeg * (Math.PI / 180), lonDeg * (Math.PI / 180), base, 0, 0, 0);
   m.decompose(beacon.position, beacon.quaternion, beacon.scale);
-  beacon.visible = true;
 }
 
 // --- start gry ---
@@ -2411,12 +2411,17 @@ function animate() {
     if (!explosions[i].update(dt)) explosions.splice(i, 1);
   }
 
-  // latarnia celu — dogruntuj gdy kafelki się dociążą
-  if (beacon.visible) {
-    beacon.userData.ring.rotation.z += dt * 0.8;
-    if (!beaconGrounded && frameCount % 60 === 0 && homeTarget) {
+  // latarnia domu — tylko z bliska, inaczej widać ją z całego lotu
+  if (beacon && mode === "home" && homeTarget && !finished && !menuOpen) {
+    const dist = distanceM(plane.latDeg, plane.lonDeg, homeTarget.lat, homeTarget.lon);
+    const show = dist <= HOME_BEACON_M;
+    if (show && (!beaconGrounded || frameCount % 60 === 0)) {
       placeBeaconAt(homeTarget.lat, homeTarget.lon);
     }
+    beacon.visible = show;
+    if (show) beacon.userData.ring.rotation.z += dt * 0.8;
+  } else if (beacon) {
+    beacon.visible = false;
   }
 
   // tryby: timer + warunki wygranej
