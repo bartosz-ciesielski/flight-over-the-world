@@ -206,7 +206,7 @@ function holdLoadedTiles() {
   if (!tiles) return;
   tileHoldUntil = performance.now() + 12000;
   tiles.resetFailedTiles();
-  tiles.errorTarget = 1e6;
+  tiles.downloadQueue.maxJobsPerOrigin = 0;
   tiles.group.visible = !menuOpen;
 }
 
@@ -215,6 +215,7 @@ function releaseTileHold() {
   if (performance.now() >= tileHoldUntil) {
     tileHoldUntil = 0;
     tiles.errorTarget = TILE_ERROR_TARGET;
+    tiles.downloadQueue.maxJobsPerOrigin = 25;
   }
 }
 let planeMesh, plane, beacon;
@@ -1845,10 +1846,11 @@ function init() {
         apiToken: ION_KEY,
         assetId: ION_GOOGLE_TILES_ASSET,
         autoRefreshToken: true,
+        useRecommendedSettings: false,
       })
     );
   } else {
-    tiles.registerPlugin(new GoogleCloudAuthPlugin({ apiToken: API_KEY }));
+    tiles.registerPlugin(new GoogleCloudAuthPlugin({ apiToken: API_KEY, useRecommendedSettings: false }));
   }
   tiles.registerPlugin(new TileCompressionPlugin());
   tiles.registerPlugin(new UpdateOnChangePlugin());
@@ -1863,9 +1865,11 @@ function init() {
   tiles.setResolutionFromRenderer(camera, renderer);
   tiles.setCamera(camera);
   tiles.errorTarget = TILE_ERROR_TARGET;
-  tiles.lruCache.maxSize = isMobile ? 1600 : 3000;
-  tiles.lruCache.maxBytesSize = isMobile ? 2.8e8 : 1.5e9;
-  if (isMobile) tiles.loadSiblings = false;
+  tiles.lruCache.maxSize = isMobile ? 2200 : 3000;
+  tiles.lruCache.maxBytesSize = isMobile ? 4.5e8 : 1.5e9;
+  tiles.addEventListener("load-tileset", () => {
+    tiles.errorTarget = TILE_ERROR_TARGET;
+  });
 
   // czytelny komunikat zamiast wiecznego ładowania
   tiles.addEventListener("load-error", (ev) => {
