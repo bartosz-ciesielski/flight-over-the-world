@@ -531,7 +531,6 @@ kbd {
 
 #landing,
 #nick,
-#rooms,
 #lobby {
   position: fixed;
   inset: 0;
@@ -551,7 +550,6 @@ kbd {
 
 #landing.hidden,
 #nick.hidden,
-#rooms.hidden,
 #lobby.hidden {
   opacity: 0;
   visibility: hidden;
@@ -627,206 +625,6 @@ kbd {
 .back-btn:hover { background: rgba(243, 234, 214, 0.08); }
 
 .landing-card { width: min(440px, calc(100vw - 48px)); }
-
-.rooms-card { width: min(640px, calc(100vw - 48px)); }
-
-.rooms-head {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  margin: 0 0 18px;
-}
-
-.menu-card.rooms-card .rooms-head h1 {
-  margin: 0;
-  padding: 0;
-  text-align: center;
-  font-size: 32px;
-}
-
-.menu-card.rooms-card .rooms-head .back-btn {
-  position: static;
-  top: auto;
-  left: auto;
-}
-
-#btn-create-room {
-  flex: 0 0 auto;
-  padding: 10px 16px;
-  background: var(--gold);
-  border: none;
-  border-radius: 6px;
-  color: #1c1710;
-  font-family: inherit;
-  font-size: 15px;
-  font-weight: 700;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.rooms-board {
-  position: relative;
-  min-height: min(320px, 46vh);
-  height: min(380px, 50vh);
-}
-
-.rooms-list {
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
-  gap: 8px;
-  margin: 0;
-  text-align: left;
-  height: 100%;
-  padding: 12px;
-  overflow-y: auto;
-  background: rgba(243, 234, 214, 0.04);
-  border: 1px solid rgba(243, 234, 214, 0.16);
-  border-radius: 10px;
-}
-
-#lobby-setup .vis-switch {
-  justify-content: center;
-  margin-bottom: 12px;
-}
-
-.room-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 16px;
-  background: rgba(243, 234, 214, 0.05);
-  border: 1px solid rgba(243, 234, 214, 0.12);
-  border-radius: 8px;
-}
-
-.room-row.featured {
-  background: rgba(216, 162, 74, 0.1);
-  border-color: rgba(216, 162, 74, 0.35);
-}
-
-.room-row.rooms-loading {
-  flex-direction: column;
-  gap: 16px;
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.room-row.rooms-loading .spin {
-  width: 32px;
-  height: 32px;
-}
-
-.room-row.empty {
-  flex: 1;
-  min-height: 100%;
-  color: var(--muted);
-  font-style: normal;
-  font-size: 20px;
-  font-weight: 600;
-  line-height: 1.35;
-  justify-content: center;
-  text-align: center;
-  padding: 28px 20px;
-  background: transparent;
-  border: none;
-}
-
-.room-row .r-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-
-.room-row .r-name {
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.room-row .r-sub {
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.room-row button {
-  flex: 0 0 auto;
-  padding: 10px 16px;
-  background: var(--gold);
-  border: none;
-  border-radius: 6px;
-  color: #1c1710;
-  font-family: inherit;
-  font-size: 14px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.room-row button:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.vis-switch {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex: 0 0 auto;
-  color: var(--paper);
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  cursor: pointer;
-  user-select: none;
-}
-
-.vis-switch input {
-  position: absolute;
-  opacity: 0;
-  width: 1px;
-  height: 1px;
-}
-
-.vis-track {
-  position: relative;
-  width: 52px;
-  height: 28px;
-  border-radius: 999px;
-  background: rgba(216, 162, 74, 0.85);
-  border: 1px solid rgba(243, 234, 214, 0.22);
-  transition: background 0.18s ease;
-}
-
-.vis-track i {
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: #1c1710;
-  transition: transform 0.18s ease;
-}
-
-.vis-switch input:checked + .vis-track {
-  background: rgba(243, 234, 214, 0.18);
-}
-
-.vis-switch input:checked + .vis-track i {
-  transform: translateX(24px);
-}
-
-#rooms-status {
-  min-height: 18px;
-  margin: 0 0 12px;
-  font-size: 13px;
-  color: var(--muted);
-}
-
-#rooms-status.err { color: #ff9d7a; }
 
 .lobby-head {
   display: grid;
@@ -921,11 +719,6 @@ kbd {
   border: 1px solid rgba(243, 234, 214, 0.2);
   border-radius: 6px;
   overflow: hidden;
-}
-
-#lobby-vis-switch.locked {
-  pointer-events: none;
-  opacity: 0.7;
 }
 
 #lobby-scopes.locked,
@@ -1837,7 +1630,6 @@ kbd {
   #menu,
   #landing,
   #nick,
-  #rooms,
   #lobby,
   #guessmap {
     align-items: start;
@@ -1846,7 +1638,6 @@ kbd {
 
   .menu-card,
   .lobby-card,
-  .rooms-card,
   .landing-card {
     width: min(760px, calc(100vw - 20px));
     padding: 22px 16px 18px;
@@ -1875,7 +1666,6 @@ kbd {
     flex-wrap: wrap;
   }
 
-  .menu-card.rooms-card .rooms-head h1,
   .menu-card.lobby-card .lobby-head h1 {
     font-size: 22px;
     padding: 0;
@@ -1884,10 +1674,6 @@ kbd {
   #start-btn,
   #lobby-copy {
     width: 100%;
-  }
-
-  .vis-switch {
-    justify-content: center;
   }
 
   #guess-scope,
