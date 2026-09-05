@@ -702,6 +702,11 @@ kbd {
   border-radius: 8px;
 }
 
+.room-row.featured {
+  background: rgba(216, 162, 74, 0.1);
+  border-color: rgba(216, 162, 74, 0.35);
+}
+
 .room-row.empty {
   flex: 1;
   min-height: 100%;

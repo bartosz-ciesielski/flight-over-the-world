@@ -76,6 +76,13 @@ function openRoom(id, handlers, isHost) {
     id,
     host: isHost,
     myPeerId: selfId,
+    getPeers() {
+      try {
+        return Object.keys(room.getPeers?.() || {});
+      } catch {
+        return [];
+      }
+    },
     send(data) {
       bus.send(data);
     },

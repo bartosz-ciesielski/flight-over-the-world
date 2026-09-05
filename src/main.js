@@ -86,7 +86,17 @@ import {
   loadWorldGeo,
   drawWorldMap,
   unprojectWorld,
+  loadEuropeGeo,
 } from "./game/modes.js";
+import {
+  EUROPE_ROOM_ID,
+  EUROPE_BOTS,
+  isEuropeRoom,
+  isBotId,
+  pinnedEuropeRoom,
+  pickEuropeLandStart,
+  pickBotGuess,
+} from "./game/bots.js";
 import {
   detectLocale,
   getRegionPack,
@@ -519,6 +529,7 @@ function uniquePlayerName(base) {
 const mp = {
   active: false,
   host: false,
+  hostId: "",
   roomId: "",
   myId: "",
   net: null,
@@ -809,6 +820,7 @@ function selectMode(m) {
   el.city.style.display = m === "guess" ? "none" : "";
   el.guessScope.style.display = m === "guess" ? "" : "none";
   el.menuError.textContent = "";
+  if (m === "guess") GUESS_SCOPES[guessScope]?.load().catch(() => {});
 }
 document.querySelectorAll("#menu .mode-card").forEach((btn) => {
   btn.addEventListener("click", () => selectMode(btn.dataset.mode));
@@ -818,6 +830,7 @@ document.querySelectorAll("#menu .scope-btn").forEach((btn) => {
     guessScope = btn.dataset.scope;
     geoCache = null;
     geoCacheScope = null;
+    GUESS_SCOPES[guessScope]?.load().catch(() => {});
     document.querySelectorAll("#menu .scope-btn").forEach((b) =>
       b.classList.toggle("selected", b === btn)
     );
@@ -902,7 +915,12 @@ function scopeLabel(scope = guessScope) {
 }
 
 function roomTitleFromParams(_visibility = mp.visibility, scope = guessScope) {
+  if (europeRoomActive()) return "Guess the region: Europe";
   return `Guess the region: ${scopeLabel(scope)}`;
+}
+
+function europeRoomActive() {
+  return isEuropeRoom(mp.roomId);
 }
 
 function playerCountLabel(n = 1 + mp.players.size) {
@@ -960,15 +978,18 @@ function closeDirectory() {
 function renderRoomList() {
   if (!el.roomsList) return;
   const live = publicRooms.filter((r) => r.id !== mp.roomId);
-  if (!live.length) {
-    const msg = "No rooms yet — create the first one";
-    el.roomsList.innerHTML = `<div class="room-row empty">${msg}</div>`;
-    return;
-  }
-  el.roomsList.innerHTML = live.map((r) => {
+  const euLive = live.find((r) => isEuropeRoom(r.id));
+  const others = live.filter((r) => !isEuropeRoom(r.id));
+  const rooms = [pinnedEuropeRoom(euLive), ...others];
+  el.roomsList.innerHTML = rooms.map((r) => {
     const playing = r.playing ? " · in flight" : "";
-    const name = r.scopeLabel ? `Guess the region: ${r.scopeLabel}` : (r.title || "Guess the region");
-    return `<div class="room-row">
+    const featured = isEuropeRoom(r.id) ? " featured" : "";
+    const name = isEuropeRoom(r.id)
+      ? "Guess the region: Europe"
+      : r.scopeLabel
+        ? `Guess the region: ${r.scopeLabel}`
+        : (r.title || "Guess the region");
+    return `<div class="room-row${featured}">
       <div class="r-meta">
         <span class="r-name">${escapeHtml(name)}</span>
         <span class="r-sub">${playerCountLabel(r.count || 1)}${playing}</span>
@@ -977,7 +998,10 @@ function renderRoomList() {
     </div>`;
   }).join("");
   el.roomsList.querySelectorAll("[data-join]").forEach((btn) => {
-    btn.addEventListener("click", () => openGuestLobby(btn.dataset.join));
+    btn.addEventListener("click", () => {
+      if (isEuropeRoom(btn.dataset.join)) openEuropeRoom();
+      else openGuestLobby(btn.dataset.join);
+    });
   });
 }
 
@@ -1021,7 +1045,8 @@ function submitNick() {
   storeNick(name);
   const joinId = pendingJoinId || parseRoomFromUrl() || savedJoin();
   if (joinId) {
-    if (wasHosting(joinId)) openHostLobby(joinId);
+    if (isEuropeRoom(joinId)) openEuropeRoom();
+    else if (wasHosting(joinId)) openHostLobby(joinId);
     else openGuestLobby(joinId);
     return;
   }
@@ -1212,13 +1237,258 @@ function applyRoster(list = []) {
       disposeMate(id);
     }
   }
+  if (mp.host && europeRoomActive()) seedEuropeBots();
   updateMpPresence();
+}
+
+function remainingPeerIds() {
+  return [...new Set([mp.myId, ...mp.players.keys()].filter((id) => id && !isBotId(id)))].sort();
+}
+
+function seedEuropeBots() {
+  if (!europeRoomActive()) return;
+  for (const b of EUROPE_BOTS) {
+    const prev = mp.players.get(b.id) || {};
+    mp.players.set(b.id, {
+      ...prev,
+      id: b.id,
+      name: b.name,
+      plane: b.plane,
+      ready: !!prev.ready,
+      score: prev.score || 0,
+      waiting: !!prev.waiting,
+      inRound: !!prev.inRound,
+    });
+  }
+}
+
+const botRuntime = new Map();
+let botPoseAcc = 0;
+let botGuessTimers = [];
+let europeClaimTimer = 0;
+
+function clearEuropeClaim() {
+  clearTimeout(europeClaimTimer);
+  europeClaimTimer = 0;
+}
+
+function clearBotGuesses() {
+  for (const t of botGuessTimers) clearTimeout(t);
+  botGuessTimers = [];
+}
+
+function snapEuropeBots() {
+  if (!mp.host || !europeRoomActive()) return;
+  const h = plane?.height ?? 3500;
+  const gh = Number.isFinite(groundAlt) ? groundAlt : h - snapAgl();
+  for (const b of EUROPE_BOTS) {
+    mp.snapped.add(b.id);
+    mp.snapInfo.set(b.id, { h, gh, heading: 0, probed: true });
+  }
+  tryReleaseGo();
+}
+
+function initBotRuntime(h) {
+  botRuntime.clear();
+  botPoseAcc = 0;
+  if (!mp.truth) return;
+  const alt = Number.isFinite(h) ? h : (plane?.height || 3500);
+  const total = Object.keys(mp.seats).length || 1;
+  for (const b of EUROPE_BOTS) {
+    const seat = mp.seats[b.id] ?? 1;
+    const spawn = offsetByIndex(mp.truth.lat, mp.truth.lon, Number(seat), total);
+    const spec = PLANES[b.plane] || PLANES.pa28;
+    botRuntime.set(b.id, {
+      lat: spawn.lat,
+      lon: spawn.lon,
+      h: alt,
+      heading: (Math.random() - 0.5) * 0.9,
+      pitch: 0,
+      roll: 0,
+      speed: spec.cruise * (0.82 + Math.random() * 0.2),
+      turn: (Math.random() - 0.5) * 0.1,
+      seq: 0,
+    });
+  }
+}
+
+function tickBots(dt) {
+  if (!mp.host || !europeRoomActive() || !mp.roundActive || !mp.goSent) return;
+  if (guessOpen || mp.phase === "mark" || mp.phase === "results") return;
+  const R = 6378137;
+  botPoseAcc += dt;
+  const send = botPoseAcc >= MATE_SEND_MS / 1000;
+  if (send) botPoseAcc = 0;
+  const now = performance.now();
+  for (const b of EUROPE_BOTS) {
+    const s = botRuntime.get(b.id);
+    if (!s) continue;
+    s.turn += (Math.random() - 0.5) * 0.05;
+    s.turn = Math.max(-0.2, Math.min(0.2, s.turn));
+    s.heading += s.turn * dt;
+    s.roll = s.turn * 1.7;
+    s.pitch = 0.025 * Math.sin(now / 1700 + s.seq);
+    const dist = s.speed * dt;
+    s.lat += ((Math.cos(s.heading) * dist) / R) * (180 / Math.PI);
+    const cos = Math.cos((s.lat * Math.PI) / 180);
+    s.lon += ((Math.sin(s.heading) * dist) / (R * Math.max(0.2, cos))) * (180 / Math.PI);
+    if (mp.truth) {
+      const away = distanceM(s.lat, s.lon, mp.truth.lat, mp.truth.lon);
+      if (away > 14000) {
+        const brg = Math.atan2(
+          (mp.truth.lon - s.lon) * cos,
+          mp.truth.lat - s.lat
+        );
+        s.heading = brg;
+        s.turn = 0;
+      }
+    }
+    if (!send) continue;
+    s.seq += 1;
+    const data = {
+      t: "pose",
+      from: b.id,
+      seq: s.seq,
+      at: now,
+      lat: s.lat,
+      lon: s.lon,
+      h: s.h,
+      heading: s.heading,
+      pitch: s.pitch,
+      roll: s.roll,
+      plane: b.plane,
+    };
+    pushMatePose(b.id, data);
+    mp.net?.send(data);
+  }
+}
+
+function scheduleBotGuesses() {
+  if (!mp.host || !europeRoomActive() || !mp.truth) return;
+  clearBotGuesses();
+  loadEuropeGeo().then((geo) => {
+    for (const b of EUROPE_BOTS) {
+      const delay = 1600 + Math.random() * 5000;
+      botGuessTimers.push(setTimeout(() => {
+        if (!mp.active || mp.phase !== "mark" || !mp.truth) return;
+        const g = pickBotGuess(mp.truth, geo, b.skill);
+        mp.guesses.set(b.id, g);
+        mp.net?.send({ t: "guess", lat: g.lat, lon: g.lon, from: b.id });
+        maybeRevealGuesses();
+      }, delay));
+    }
+  }).catch(() => {});
+}
+
+function openEuropeRoom() {
+  openGuestLobby(EUROPE_ROOM_ID);
+  clearEuropeClaim();
+  europeClaimTimer = setTimeout(() => {
+    europeClaimTimer = 0;
+    if (!mp.active || !europeRoomActive() || welcomed || mp.host) return;
+    claimHost();
+  }, 1600);
+}
+
+function applyHost(id) {
+  if (!id) return;
+  clearEuropeClaim();
+  const wasHost = mp.host;
+  mp.hostId = id;
+  mp.host = id === mp.myId;
+  if (mp.host) {
+    mp.joining = false;
+    welcomed = true;
+    stopHelloRetry();
+    rememberHost(mp.roomId);
+    if (europeRoomActive()) {
+      mp.visibility = "public";
+      seedEuropeBots();
+    }
+    if (mp.visibility === "public") {
+      ensureDirectory();
+      publishRoom();
+    }
+  } else if (wasHost) {
+    clearInterval(announceTimer);
+    announceTimer = 0;
+  }
+}
+
+function considerHost(id) {
+  if (!id) return;
+  if (mp.host && id !== mp.myId && id > mp.myId) return;
+  applyHost(id);
+}
+
+function claimHost() {
+  applyHost(mp.myId);
+  mp.net?.send({ t: "host", id: mp.myId });
+  if (europeRoomActive()) seedEuropeBots();
+  broadcastRoster();
+  resumeHostDuties();
+}
+
+function electHostIfNeeded(leftId) {
+  if (!mp.active) return;
+  if (mp.joining && !welcomed && leftId !== mp.hostId) return;
+  const alive = remainingPeerIds();
+  if (mp.hostId && alive.includes(mp.hostId)) return;
+  const winner = alive[0];
+  if (!winner) return;
+  if (winner === mp.myId) {
+    if (!mp.host) setLobbyStatus("You are the host now — the room stays open");
+    claimHost();
+    return;
+  }
+  applyHost(winner);
+}
+
+function resumeHostDuties() {
+  if (!mp.host) return;
+  if (europeRoomActive()) {
+    setLobbyScope("eu");
+    seedEuropeBots();
+  }
+  if (mp.phase === "results") {
+    if (mp.resultsLeft <= 0 && !mp.launching) launchMpRound();
+    else tryLaunchRematch();
+  } else if (europeRoomActive() && !mp.roundActive && !mp.launching) {
+    launchMpRound();
+  } else {
+    if (mp.roundActive && !mp.goSent) tryReleaseGo();
+    checkRoundClear();
+    tryLaunchRematch();
+  }
+  if (europeRoomActive() && mp.roundActive) {
+    snapEuropeBots();
+    if (mp.goSent) initBotRuntime(plane?.height);
+  }
+  renderLobby();
+  updateMpPresence();
+}
+
+function dropPeer(peerId) {
+  if (!peerId) return null;
+  dropVoicePeer(peerId);
+  mp.talkers.delete(peerId);
+  const gone = mp.players.get(peerId) || null;
+  mp.players.delete(peerId);
+  mp.poses.delete(peerId);
+  mp.guesses.delete(peerId);
+  mp.snapped.delete(peerId);
+  mp.snapInfo.delete(peerId);
+  mp.rematch.delete(peerId);
+  disposeMate(peerId);
+  updateVoiceUi();
+  return gone;
 }
 
 function broadcastRoster() {
   if (!mp.host || !mp.net) return;
   mp.net.send({
     t: "roster",
+    hostId: mp.myId,
     players: rosterPayload(),
     roundActive: mp.roundActive,
     mode: "guess",
@@ -1253,7 +1523,7 @@ function renderLobby() {
     }</div>`);
   }
   el.lobbyPlayers.innerHTML = rows.join("");
-  el.lobbyScopes.classList.toggle("locked", !mp.host);
+  el.lobbyScopes.classList.toggle("locked", !mp.host || europeRoomActive());
   if (el.lobbyCity) {
     el.lobbyCity.style.display = "none";
     el.lobbyCity.classList.add("locked");
@@ -1262,20 +1532,23 @@ function renderLobby() {
   if (mp.roomId) el.lobbyLink.value = roomLink(mp.roomId);
   document.querySelector(".lobby-link-row")?.classList.remove("hidden");
   if (el.roomVis) el.roomVis.checked = mp.visibility === "private";
-  el.lobbyVisSwitch?.classList.toggle("locked", !mp.host);
+  el.lobbyVisSwitch?.classList.toggle("locked", !mp.host || europeRoomActive());
   if (el.lobbyTitle) el.lobbyTitle.textContent = roomTitleFromParams();
   if (el.lobbyVis) el.lobbyVis.textContent = playerCountLabel();
 
   const queued = mp.waiting || (mp.roundActive && !mp.inRound);
-  el.lobbyStart.disabled = queued || !mp.host || mp.roundActive || mp.launching;
+  el.lobbyStart.disabled = queued || !mp.host || mp.roundActive || mp.launching || europeRoomActive();
   el.lobbyStart.textContent = queued
     ? "Wait for next round"
-    : mp.host
-      ? "Start match"
-      : "Waiting for host";
+    : europeRoomActive()
+      ? mp.roundActive || mp.launching ? "Match running" : "Starting…"
+      : mp.host
+        ? "Start match"
+        : "Waiting for host";
 
   if (queued) setLobbyStatus("Round in progress – you will join the next one");
   else if (mp.joining) setLobbyStatus("Joining room…");
+  else if (europeRoomActive()) setLobbyStatus("Open Europe match — Mira and Jonas are already flying. Fly 60s, then mark the map.");
   else if (!mp.host) setLobbyStatus(`Host picks the map. Fly 60s, mark in 10s, then the next round.`);
   else setLobbyStatus(`Pick a country or continent, then start. Anyone can join this ${mp.visibility} room.`);
 }
@@ -1325,7 +1598,7 @@ function attachNet(api) {
 }
 
 function voiceTargets() {
-  return [...mp.players.keys()];
+  return [...mp.players.keys()].filter((id) => !isBotId(id));
 }
 
 function voiceEnabled() {
@@ -1416,6 +1689,7 @@ function handleNetData(data, fromId) {
       t: "welcome",
       id: fromId,
       name,
+      hostId: mp.myId,
       roster: rosterPayload(),
       roundActive: mp.roundActive,
       mode: "guess",
@@ -1431,6 +1705,16 @@ function handleNetData(data, fromId) {
     refreshVoice();
   } else if (data.t === "who") {
     sendHello();
+  } else if (data.t === "host") {
+    const id = data.id || data.from;
+    if (!id) return;
+    if (id !== mp.myId && remainingPeerIds()[0] === mp.myId && id > mp.myId) {
+      if (!mp.host) claimHost();
+      return;
+    }
+    applyHost(id);
+    if (mp.joining && !welcomed) sendHello();
+    renderLobby();
   } else if (data.t === "welcome") {
     welcomed = true;
     mp.joining = false;
@@ -1438,6 +1722,7 @@ function handleNetData(data, fromId) {
     rememberJoin("");
     if (data.id) mp.myId = data.id;
     if (data.name) mp.myName = data.name;
+    applyHost(data.hostId || fromId);
     mp.roundActive = !!data.roundActive;
     mp.waiting = !!data.roundActive;
     applyRemoteRegion(data);
@@ -1464,6 +1749,7 @@ function handleNetData(data, fromId) {
     if (data.scope) setLobbyScope(data.scope);
     selectLobbyMode("guess");
     if (data.city != null) el.lobbyCity.value = data.city;
+    considerHost(data.hostId || fromId);
     applyRoster(data.players);
     applyLobbySetup();
     renderLobby();
@@ -1521,6 +1807,7 @@ function handleNetData(data, fromId) {
       return;
     }
     applyRemoteRegion(data);
+    considerHost(data.hostId || fromId);
     startMpFlight(data);
   } else if (data.t === "pose") {
     const id = data.from;
@@ -1562,35 +1849,35 @@ function handlePeerJoined(peerId) {
 }
 
 function handlePeerLeft(peerId) {
-  if (peerId) {
-    dropVoicePeer(peerId);
-    mp.talkers.delete(peerId);
-    updateVoiceUi();
-  }
   if (!peerId) {
-    disposeAllMates();
-    mp.players.clear();
-    mp.roundActive = false;
-    mp.inRound = false;
-    mp.waiting = false;
-    if (!menuOpen) backToLobby();
-    else renderLobby();
-    setLobbyStatus("Host left – the room closed", true);
+    const live = [...(mp.net?.getPeers?.() || [])];
+    if (mp.joining && !welcomed) return;
+    if (live.length) {
+      for (const id of [...mp.players.keys()]) {
+        if (!isBotId(id) && !live.includes(id)) dropPeer(id);
+      }
+    } else if (mp.hostId && mp.hostId !== mp.myId) {
+      dropPeer(mp.hostId);
+    }
+    electHostIfNeeded(mp.hostId);
+    if (guessOpen) maybeRevealGuesses();
+    renderLobby();
+    updateMpPresence();
     return;
   }
-  const gone = mp.players.get(peerId);
-  mp.players.delete(peerId);
-  mp.poses.delete(peerId);
-  mp.guesses.delete(peerId);
-  disposeMate(peerId);
+  if (isBotId(peerId)) return;
+  const wasHost = peerId === mp.hostId;
+  const gone = dropPeer(peerId);
+  electHostIfNeeded(peerId);
   if (mp.host) {
-    checkRoundClear();
+    if (mp.phase !== "results") checkRoundClear();
     broadcastRoster();
   }
   if (guessOpen) maybeRevealGuesses();
   renderLobby();
   updateMpPresence();
-  if (gone) setLobbyStatus(`${gone.name} left the room`);
+  if (wasHost && mp.host) setLobbyStatus("You are the host now — the room stays open");
+  else if (gone) setLobbyStatus(`${gone.name} left the room`);
 }
 
 function handleNetError(err) {
@@ -1619,6 +1906,7 @@ function closeRoom() {
   mp.roomId = "";
   mp.myId = "";
   mp.host = false;
+  mp.hostId = "";
   mp.myReady = false;
   mp.myScore = 0;
   mp.waiting = false;
@@ -1633,6 +1921,9 @@ function closeRoom() {
   mp.rematch.clear();
   mp.launching = false;
   hideMpWait();
+  clearEuropeClaim();
+  clearBotGuesses();
+  botRuntime.clear();
   mp.talkers.clear();
   destroyVoice();
   updateVoiceUi();
@@ -1661,10 +1952,17 @@ function openHostLobby(existingId, opts = {}) {
       if (gen !== hostGen) return;
       mp.roomId = id;
       mp.myId = myId || api.myPeerId || id;
+      mp.hostId = mp.myId;
       rememberHost(id);
       setRoomUrl(id);
       el.lobbyLink.value = roomLink(id);
       publishRoom();
+      if (europeRoomActive()) {
+        setLobbyScope("eu");
+        seedEuropeBots();
+        resumeHostDuties();
+        return;
+      }
       renderLobby();
       setLobbyStatus(
         mp.visibility === "private"
@@ -1688,7 +1986,7 @@ function openGuestLobby(id) {
   mp.active = true;
   mp.host = false;
   mp.joining = true;
-  mp.visibility = "private";
+  mp.visibility = isEuropeRoom(id) ? "public" : "private";
   mp.myName = normalizeNick(mp.myName) || savedNick() || randomUsername();
   mp.roomId = id;
   rememberJoin(id);
@@ -1718,7 +2016,7 @@ function openGuestLobby(id) {
 function tryStartMp() {}
 
 async function launchMpRound() {
-  if (mp.launching) return;
+  if (!mp.host || mp.launching) return;
   mp.launching = true;
   mode = "guess";
   mp.waiting = false;
@@ -1729,10 +2027,15 @@ async function launchMpRound() {
   el.lobbyStart.disabled = true;
   showMpWait("Picking a new point…");
   try {
-    const scope = GUESS_SCOPES[guessScope];
-    setLobbyStatus(scope.status);
-    const p = pickGuessStart(guessScope);
-    const msg = { t: "start", mode: "guess", lat: p.lat, lon: p.lon, scope: guessScope, seats: buildSeats(), ...regionPayload() };
+    const scopeInfo = GUESS_SCOPES[europeRoomActive() ? "eu" : guessScope];
+    setLobbyStatus(scopeInfo.status);
+    if (europeRoomActive()) {
+      setLobbyScope("eu");
+      seedEuropeBots();
+    }
+    const p = europeRoomActive() ? await pickEuropeLandStart() : await pickGuessStart(guessScope);
+    const nextScope = europeRoomActive() ? "eu" : guessScope;
+    const msg = { t: "start", mode: "guess", lat: p.lat, lon: p.lon, scope: nextScope, seats: buildSeats(), hostId: mp.myId, ...regionPayload() };
     mp.net?.send(msg);
     startMpFlight(msg);
   } catch {
@@ -1842,6 +2145,7 @@ async function startMpFlight(msg) {
   }
   guessScope = nextScope;
   mp.active = true;
+  clearBotGuesses();
   mp.guesses.clear();
   mp.poses.clear();
   mp.poseSeq = 0;
@@ -1878,6 +2182,7 @@ async function startMpFlight(msg) {
   if (selectedPlane !== planeMesh?.userData?.key) loadPlane(selectedPlane);
   beginFlight(spawn.lat, spawn.lon);
   seedAllMates(plane.height);
+  if (mp.host && europeRoomActive()) snapEuropeBots();
   if (mode === "home" && homeTarget) placeBeaconAt(homeTarget.lat, homeTarget.lon);
   if (mp.host) {
     broadcastRoster();
@@ -1967,6 +2272,7 @@ function applyGo(msg) {
   mp.goAt = performance.now();
   mp.lastPoseAt = 0;
   seedAllMates(payload.h ?? plane.height);
+  if (mp.host && europeRoomActive()) initBotRuntime(payload.h ?? plane.height);
   hideMpWait();
   finishSnapStart();
 }
@@ -2075,9 +2381,10 @@ function setLobbyScope(scope, broadcast = false) {
     geoCacheScope = null;
   }
   guessScope = scope;
-  document.querySelectorAll("#lobby-scopes .scope-btn").forEach((b) =>
-    b.classList.toggle("selected", b.dataset.scope === scope)
-  );
+  GUESS_SCOPES[guessScope]?.load().catch(() => {});
+  document.querySelectorAll("#lobby-scopes .scope-btn").forEach((b) => {
+    b.classList.toggle("selected", b.dataset.scope === scope);
+  });
   syncRoomTitle();
   if (el.lobbyTitle) el.lobbyTitle.textContent = roomTitleFromParams();
   if (broadcast && mp.host && mp.net) {
@@ -2672,7 +2979,8 @@ async function startGame() {
       beginFlight(start.lat, start.lon);
       placeBeaconAt(loc.lat, loc.lon);
     } else {
-      const p = pickGuessStart(guessScope);
+      el.menuError.textContent = GUESS_SCOPES[guessScope].status;
+      const p = await pickGuessStart(guessScope);
       timeLeft = GUESS_TIME;
       timerActive = false; // włączy się po dosadzeniu (finishSnapStart)
       beginFlight(p.lat, p.lon);
@@ -2958,6 +3266,7 @@ function openGuessMap() {
     mp.markLeft = MARK_TIME;
     if (el.gmTitle) el.gmTitle.textContent = "Where are you?";
     el.gmSub.textContent = "You have 10 seconds to mark the map";
+    scheduleBotGuesses();
   } else {
     if (el.gmTitle) el.gmTitle.textContent = "Where are you?";
     if (el.gmTimer) el.gmTimer.textContent = "";
@@ -2998,7 +3307,7 @@ function updateGuessPhaseUi() {
     if (el.gmTitle) el.gmTitle.textContent = "Where are you?";
   } else if (mp.phase === "results") {
     const sec = Math.max(0, Math.ceil(mp.resultsLeft));
-    el.gmTimer.textContent = `Next round in ${sec}s`;
+    el.gmTimer.textContent = sec > 0 ? `Next round in ${sec}s` : "Starting next round…";
     if (el.gmTitle) el.gmTitle.textContent = "Results";
     el.gmSub.textContent = "Scores are in — next location coming up";
   } else {
@@ -3171,6 +3480,18 @@ window.addEventListener("keydown", (e) => {
     else showMapUnavailable();
     return;
   }
+  if (!e.repeat && !menuOpen && !paused && !guessOpen) {
+    if (k === "f") {
+      e.preventDefault();
+      setSpeedLatch("boost");
+      return;
+    }
+    if (k === "c") {
+      e.preventDefault();
+      setSpeedLatch("brake");
+      return;
+    }
+  }
   if (menuOpen || paused || guessOpen) return;
   keys.add(k);
   if (k === "r" && (crashed || finished)) restartMode();
@@ -3189,6 +3510,25 @@ el.mpOnline?.addEventListener("click", () => {
 window.addEventListener("blur", () => stopTalk());
 
 const touch = { roll: 0, pitch: 0, boost: false, brake: false, pid: null };
+
+function syncSpeedButtons() {
+  el.touchBoost?.classList.toggle("held", touch.boost);
+  el.touchBrake?.classList.toggle("held", touch.brake);
+}
+
+function setSpeedLatch(which) {
+  if (which === "boost") {
+    touch.boost = !touch.boost;
+    if (touch.boost) touch.brake = false;
+  } else if (which === "brake") {
+    touch.brake = !touch.brake;
+    if (touch.brake) touch.boost = false;
+  } else {
+    touch.boost = false;
+    touch.brake = false;
+  }
+  syncSpeedButtons();
+}
 
 function resetStick() {
   touch.roll = 0;
@@ -3236,6 +3576,14 @@ function bindHold(btn, down, up) {
   btn.addEventListener("pointercancel", end);
 }
 
+function bindLatch(btn, which) {
+  if (!btn) return;
+  btn.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    setSpeedLatch(which);
+  });
+}
+
 if (el.stick) {
   el.stick.addEventListener("pointerdown", (e) => {
     e.preventDefault();
@@ -3254,8 +3602,8 @@ if (el.stick) {
   el.stick.addEventListener("pointerup", endStick);
   el.stick.addEventListener("pointercancel", endStick);
 }
-bindHold(el.touchBoost, () => { touch.boost = true; }, () => { touch.boost = false; });
-bindHold(el.touchBrake, () => { touch.brake = true; }, () => { touch.brake = false; });
+bindLatch(el.touchBoost, "boost");
+bindLatch(el.touchBrake, "brake");
 bindHold(el.touchTalk, () => startTalk(), () => stopTalk());
 el.touchPause?.addEventListener("click", () => setPaused(true));
 el.touchMap?.addEventListener("click", () => toggleFreeMap());
@@ -3270,12 +3618,11 @@ function syncTouchUi() {
   el.touch.classList.toggle("free", mode === "free");
   if (!show) {
     resetStick();
-    touch.boost = false;
-    touch.brake = false;
+    setSpeedLatch(null);
   }
 }
 
-function restartMode() {
+async function restartMode() {
   if (mp.active) {
     backToLobby();
     return;
@@ -3288,7 +3635,7 @@ function restartMode() {
     resetFlight(startLat, startLon);
     placeBeaconAt(homeTarget.lat, homeTarget.lon);
   } else if (mode === "guess") {
-    const p = pickGuessStart(guessScope);
+    const p = await pickGuessStart(guessScope);
     timeLeft = GUESS_TIME;
     timerActive = false; // włączy się po dosadzeniu (finishSnapStart)
     awaitingSnap = true;
@@ -3405,6 +3752,7 @@ function tickFrame() {
     if (mate.mesh) spinRotors(mate.mesh, dt, plane.speed);
   }
 
+  if (mp.active) tickBots(dt);
   if (mp.active && !menuOpen && !guessOpen && !crashed) {
     const now = performance.now();
     if (now - mp.lastPoseAt > MATE_SEND_MS) {

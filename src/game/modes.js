@@ -187,12 +187,57 @@ const GUESS_SPAWNS = {
   ],
 };
 
-export function pickGuessStart(scope) {
+export function randomPointInBBox(bbox, landGeo) {
+  const [lon0, lat0, lon1, lat1] = bbox;
+  for (let tries = 0; tries < 2000; tries++) {
+    const lon = lon0 + Math.random() * (lon1 - lon0);
+    const lat = lat0 + Math.random() * (lat1 - lat0);
+    if (!landGeo || pointInPoland(lon, lat, landGeo)) return { lat, lon };
+  }
+  return { lat: (lat0 + lat1) / 2, lon: (lon0 + lon1) / 2 };
+}
+
+function cityFallback(scope) {
   if (scope === "pl") return pickCountryStart();
   if (scope === "eu") return pickContinentStart();
   const list = GUESS_SPAWNS.world;
   const [lat, lon] = list[Math.floor(Math.random() * list.length)];
   return { lat, lon };
+}
+
+async function pickGuessStartOnce(scope) {
+  try {
+    const pack = getRegionPack();
+    if (scope === "pl") {
+      const geo = await loadCountryGeo();
+      if (pack.countryCode === "PL") return randomPointInPoland(geo);
+      return randomPointInBBox(pack.country.bbox, geo);
+    }
+    if (scope === "eu") {
+      const geo = await loadContinentGeo();
+      if (pack.continentId === "europe") return randomPointInEurope(geo);
+      return randomPointInBBox(pack.continent.bbox, geo);
+    }
+    return randomPointInWorld(await loadWorldGeo());
+  } catch {
+    return cityFallback(scope);
+  }
+}
+
+const recentStarts = [];
+const RECENT_KEEP = 14;
+const MIN_SEP_M = 45000;
+
+export async function pickGuessStart(scope) {
+  let pick = await pickGuessStartOnce(scope);
+  for (let i = 0; i < 10; i++) {
+    const far = recentStarts.every((q) => distanceM(pick.lat, pick.lon, q.lat, q.lon) > MIN_SEP_M);
+    if (far) break;
+    pick = await pickGuessStartOnce(scope);
+  }
+  recentStarts.push(pick);
+  if (recentStarts.length > RECENT_KEEP) recentStarts.shift();
+  return pick;
 }
 
 export function makeBBoxProject(bbox) {

@@ -382,8 +382,13 @@ export function applyTileQuality(tiles, mobile = false) {
   tiles.loadAncestors = true;
   tiles.loadSiblings = !mobile;
   tiles.downloadQueue.maxJobsPerOrigin = mobile ? 8 : TILE_QUALITY.maxJobs;
-  tiles.lruCache.maxSize = mobile ? 900 : TILE_QUALITY.cacheTiles;
-  tiles.lruCache.maxBytesSize = mobile ? 4.5e8 : TILE_QUALITY.cacheBytes;
-  tiles.lruCache.minSize = mobile ? 180 : 800;
-  tiles.lruCache.unloadPercent = mobile ? 0.2 : 0.05;
+  const maxTiles = mobile ? 900 : TILE_QUALITY.cacheTiles;
+  const maxBytes = mobile ? 4.5e8 : TILE_QUALITY.cacheBytes;
+  tiles.lruCache.maxSize = maxTiles;
+  tiles.lruCache.minSize = maxTiles;
+  tiles.lruCache.maxBytesSize = maxBytes;
+  // default minBytes is ~322MB — unused tiles were dumped as soon as
+  // you looked away, then downloaded again from scratch
+  tiles.lruCache.minBytesSize = maxBytes;
+  tiles.lruCache.unloadPercent = mobile ? 0.08 : 0.05;
 }
