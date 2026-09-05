@@ -48,22 +48,13 @@
 
     <div id="rooms" class="hidden">
       <div class="menu-card rooms-card">
-        <button id="rooms-back" class="back-btn" type="button">‹ Back</button>
         <div class="rooms-head">
+          <button id="rooms-back" class="back-btn" type="button">‹ Back</button>
           <h1>Multiplayer</h1>
           <button id="btn-create-room" type="button">Create room</button>
         </div>
         <div class="rooms-board">
           <div id="rooms-list" class="rooms-list"></div>
-          <div id="rooms-create-panel" class="rooms-create-panel hidden">
-            <label class="vis-switch">
-              <span>Public</span>
-              <input id="room-vis" type="checkbox" />
-              <span class="vis-track" aria-hidden="true"><i></i></span>
-              <span>Private</span>
-            </label>
-            <button id="btn-create-confirm" type="button">Create</button>
-          </div>
         </div>
         <p id="rooms-status" class="hidden"></p>
       </div>
@@ -71,8 +62,10 @@
 
     <div id="lobby" class="hidden">
       <div class="menu-card lobby-card">
-        <button id="lobby-back" class="back-btn" type="button">‹ Back</button>
-        <h1 id="lobby-title">Room</h1>
+        <div class="lobby-head">
+          <button id="lobby-back" class="back-btn" type="button">‹ Back</button>
+          <h1 id="lobby-title">Room</h1>
+        </div>
         <p id="lobby-vis" class="lobby-vis">Public · Guess the region</p>
         <div class="carousel lobby-carousel">
           <button id="lobby-car-prev" type="button" aria-label="Previous">‹</button>
@@ -85,6 +78,12 @@
         </div>
         <p id="lobby-mode-desc">Fly for one minute, then mark the map in 10 seconds. Closest guess scores.</p>
         <div id="lobby-setup">
+          <label class="vis-switch" id="lobby-vis-switch">
+            <span>Public</span>
+            <input id="room-vis" type="checkbox" />
+            <span class="vis-track" aria-hidden="true"><i></i></span>
+            <span>Private</span>
+          </label>
           <div id="lobby-scopes">
             <button class="scope-btn selected" data-scope="pl" type="button">🇵🇱 Poland</button>
             <button class="scope-btn" data-scope="eu" type="button">🇪🇺 Europe</button>

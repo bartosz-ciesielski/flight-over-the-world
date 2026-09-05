@@ -444,15 +444,24 @@ kbd {
 .rooms-card { width: min(640px, calc(100vw - 48px)); }
 
 .rooms-head {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  gap: 12px;
   margin: 0 0 18px;
 }
 
-.rooms-head h1 {
+.menu-card.rooms-card .rooms-head h1 {
   margin: 0;
+  padding: 0;
+  text-align: center;
+  font-size: 32px;
+}
+
+.menu-card.rooms-card .rooms-head .back-btn {
+  position: static;
+  top: auto;
+  left: auto;
 }
 
 #btn-create-room {
@@ -490,34 +499,9 @@ kbd {
   border-radius: 10px;
 }
 
-.rooms-create-panel {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+#lobby-setup .vis-switch {
   justify-content: center;
-  gap: 18px;
-  padding: 24px;
-  background: rgba(16, 22, 15, 0.82);
-  border: 1px solid rgba(243, 234, 214, 0.16);
-  border-radius: 10px;
-}
-
-.rooms-create-panel.hidden {
-  display: none;
-}
-
-#btn-create-confirm {
-  padding: 12px 28px;
-  background: var(--gold);
-  border: none;
-  border-radius: 6px;
-  color: #1c1710;
-  font-family: inherit;
-  font-size: 16px;
-  font-weight: 700;
-  cursor: pointer;
+  margin-bottom: 12px;
 }
 
 .room-row {
@@ -640,8 +624,28 @@ kbd {
 
 #rooms-status.err { color: #ff9d7a; }
 
+.lobby-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 8px;
+}
+
+.menu-card.lobby-card .lobby-head h1 {
+  margin: 0;
+  padding: 0;
+  text-align: center;
+}
+
+.menu-card.lobby-card .lobby-head .back-btn {
+  position: static;
+  top: auto;
+  left: auto;
+}
+
 .lobby-vis {
-  margin: -8px 0 16px;
+  margin: 0 0 16px;
   color: var(--gold);
   font-size: 13px;
   font-weight: 700;
@@ -714,6 +718,11 @@ kbd {
   border: 1px solid rgba(243, 234, 214, 0.2);
   border-radius: 6px;
   overflow: hidden;
+}
+
+#lobby-vis-switch.locked {
+  pointer-events: none;
+  opacity: 0.7;
 }
 
 #lobby-scopes.locked,
@@ -1425,9 +1434,14 @@ kbd {
   }
 
   .start-row,
-  .lobby-link-row,
-  .rooms-head {
+  .lobby-link-row {
     flex-wrap: wrap;
+  }
+
+  .menu-card.rooms-card .rooms-head h1,
+  .menu-card.lobby-card .lobby-head h1 {
+    font-size: 22px;
+    padding: 0;
   }
 
   #start-btn,

@@ -372,8 +372,7 @@ const el = {
   roomsBack: document.getElementById("rooms-back"),
   roomVis: document.getElementById("room-vis"),
   btnCreateRoom: document.getElementById("btn-create-room"),
-  btnCreateConfirm: document.getElementById("btn-create-confirm"),
-  roomsCreatePanel: document.getElementById("rooms-create-panel"),
+  lobbyVisSwitch: document.getElementById("lobby-vis-switch"),
   lobby: document.getElementById("lobby"),
   lobbyTitle: document.getElementById("lobby-title"),
   lobbyVis: document.getElementById("lobby-vis"),
@@ -677,7 +676,6 @@ function showRooms() {
   lobbyCarousel.setActive(false);
   rememberHost("");
   history.replaceState(null, "", location.pathname + location.search);
-  showCreatePanel(false);
   ensureDirectory();
   renderRoomList();
 }
@@ -815,7 +813,7 @@ function renderLobby() {
   ];
   for (const p of otherPlayers()) rows.push(playerRow(p, false));
   if (mp.players.size === 0) {
-    rows.push(`<div class="player-row empty">${mp.visibility === "private" ? "Private room – share the code" : "Waiting for players…"}</div>`);
+    rows.push(`<div class="player-row empty">${mp.visibility === "private" ? "Private room – share the link" : "Waiting for players…"}</div>`);
   }
   el.lobbyPlayers.innerHTML = rows.join("");
   el.lobbyScopes.classList.toggle("locked", !mp.host);
@@ -825,12 +823,12 @@ function renderLobby() {
     el.lobbyCity.readOnly = true;
   }
   if (mp.roomId) el.lobbyLink.value = roomLink(mp.roomId);
-  document.querySelector(".lobby-link-row")?.classList.toggle("hidden", mp.visibility !== "private");
+  document.querySelector(".lobby-link-row")?.classList.remove("hidden");
+  if (el.roomVis) el.roomVis.checked = mp.visibility === "private";
+  el.lobbyVisSwitch?.classList.toggle("locked", !mp.host);
   if (el.lobbyTitle) el.lobbyTitle.textContent = roomTitleFromParams();
   if (el.lobbyVis) {
-    const vis = mp.visibility === "private" ? "Private" : "Public";
-    const code = mp.visibility === "private" && mp.roomId ? ` · code ${mp.roomId}` : "";
-    el.lobbyVis.textContent = `${vis} · Guess the region · ${scopeLabel()}${code}`;
+    el.lobbyVis.textContent = `${mp.visibility === "private" ? "Private" : "Public"} · Guess the region · ${scopeLabel()}`;
   }
 
   const queued = mp.waiting || (mp.roundActive && !mp.inRound);
@@ -1206,15 +1204,14 @@ function openHostLobby(existingId, opts = {}) {
       mp.roomId = id;
       mp.myId = myId || api.myPeerId || id;
       rememberHost(id);
-      if (mp.visibility === "private") history.replaceState(null, "", `#r=${id}`);
-      else history.replaceState(null, "", location.pathname + location.search);
+      history.replaceState(null, "", `#r=${id}`);
       el.lobbyLink.value = roomLink(id);
       publishRoom();
       renderLobby();
       setLobbyStatus(
         mp.visibility === "private"
-          ? `Private room ready — share the code ${id}`
-          : "Public room is live — friends can join from the list"
+          ? `Private room ready — share the link`
+          : "Public room is live — friends can join from the list or the link"
       );
     },
     onPeer: handlePeerJoined,
@@ -2097,19 +2094,25 @@ el.btnMulti.addEventListener("click", () => {
   unlockAudio();
   showRooms();
 });
-function showCreatePanel(show) {
-  el.roomsCreatePanel?.classList.toggle("hidden", !show);
-}
-
 el.roomsBack?.addEventListener("click", () => showLanding());
 el.btnCreateRoom?.addEventListener("click", () => {
   unlockAudio();
-  showCreatePanel(true);
+  openHostLobby(null, { visibility: "public" });
 });
-el.btnCreateConfirm?.addEventListener("click", () => {
-  unlockAudio();
-  showCreatePanel(false);
-  openHostLobby(null, { visibility: el.roomVis?.checked ? "private" : "public" });
+el.roomVis?.addEventListener("change", () => {
+  if (!mp.host) return;
+  const next = el.roomVis.checked ? "private" : "public";
+  if (next === mp.visibility) return;
+  mp.visibility = next;
+  syncRoomTitle();
+  if (mp.visibility === "private") {
+    stopPublishing();
+  } else {
+    publishRoom();
+  }
+  mp.net?.send({ t: "roster", players: rosterPayload(), roundActive: mp.roundActive, mode: "guess", scope: guessScope, visibility: mp.visibility, title: mp.roomTitle, ...regionPayload() });
+  renderLobby();
+  updateVoiceUi();
 });
 el.menuBack.addEventListener("click", () => showLanding());
 el.lobbyBack.addEventListener("click", () => showRooms());
