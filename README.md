@@ -1,6 +1,6 @@
 # Lot nad światem
 
-Lot nad fotorealistyczną Ziemią — zgadnij region, doleć do domu albo po prostu lataj. Single player i multiplayer.
+Lot nad fotorealistyczną Ziemią – zgadnij region, doleć do domu albo po prostu lataj. Single player i multiplayer.
 
 ![Lot nad Paryżem](docs/screens/00-paryz.png)
 
@@ -14,24 +14,24 @@ Lot nad fotorealistyczną Ziemią — zgadnij region, doleć do domu albo po pro
     <td width="50%"><img src="docs/screens/02-menu.png" alt="Wybór samolotu i trybu" /></td>
   </tr>
   <tr>
-    <td align="center">Start — single albo multiplayer</td>
-    <td align="center">Hangar, tryb i zakres mapy</td>
+    <td align="center">Start – single albo multiplayer</td>
+    <td align="center">Wybierz samolot, tryb i zakres mapy</td>
   </tr>
   <tr>
-    <td><img src="docs/screens/03-lobby.png" alt="Pokój multiplayer" /></td>
+    <td><img src="docs/screens/06-ny.png" alt="Lot nad Nowym Jorkiem" /></td>
     <td><img src="docs/screens/05-pauza.png" alt="Pauza" /></td>
   </tr>
   <tr>
-    <td align="center">Pokój — link dla znajomych</td>
+    <td align="center">Lataj gdzie chcesz</td>
     <td align="center">Pauza w locie</td>
   </tr>
 </table>
 
 ## Tryby
 
-- **Zgadnij region** — minuta lotu, potem zaznacz na mapie, gdzie jesteś (Polska / Europa / Świat).
-- **Doleć do domu** — start ~30 km od wpisanego adresu, 10 minut na powrót.
-- **Swobodny lot** — wybierz miasto i lataj.
+- **Zgadnij region** – minuta lotu, potem zaznacz na mapie, gdzie jesteś (Polska / Europa / Świat).
+- **Doleć do domu** – start ~30 km od wpisanego adresu, 10 minut na powrót.
+- **Swobodny lot** – wybierz miasto i lataj.
 
 ## Sterowanie
 
@@ -65,4 +65,4 @@ npm run dev
 
 Otwórz adres z terminala (zwykle `http://localhost:5173`). W multiplayer jeden klika Multiplayer, drugi wchodzi w skopiowany link.
 
-Klucza nie commituj — `.env` jest w `.gitignore`. W menu kafelki się nie ładują, dopiero po starcie lotu.
+Klucza nie commituj – `.env` jest w `.gitignore`. W menu kafelki się nie ładują, dopiero po starcie lotu.
