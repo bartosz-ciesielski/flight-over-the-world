@@ -11,7 +11,8 @@
   "dependencies": {
     "3d-tiles-renderer": "^0.5.2",
     "peerjs": "^1.5.5",
-    "three": "^0.170.0"
+    "three": "^0.170.0",
+    "trystero": "^0.25.4"
   },
   "devDependencies": {
     "vite": "^6.2.0"

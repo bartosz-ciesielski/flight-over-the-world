@@ -1,42 +1,9 @@
-import { Peer } from "peerjs";
+import { joinRoom as troJoin, selfId } from "trystero";
 
-export const PEER_OPTS = {
-  debug: 0,
-  secure: true,
-  host: "0.peerjs.com",
-  port: 443,
-  path: "/",
-  config: {
-    iceServers: [
-      { urls: "stun:stun.l.google.com:19302" },
-      { urls: "stun:stun1.l.google.com:19302" },
-      { urls: "stun:stun.cloudflare.com:3478" },
-      {
-        urls: "turn:openrelay.metered.ca:80",
-        username: "openrelayproject",
-        credential: "openrelayproject",
-      },
-      {
-        urls: "turn:openrelay.metered.ca:443",
-        username: "openrelayproject",
-        credential: "openrelayproject",
-      },
-    ],
-  },
-};
-
-export const CONNECT_OPTS = { reliable: true, serialization: "json" };
+const TRO = { appId: "flightoverearth-v1" };
 
 function roomId() {
   return "lns" + Math.random().toString(36).slice(2, 8);
-}
-
-function guestId() {
-  return "lnsc" + Math.random().toString(36).slice(2, 10);
-}
-
-function makePeer(id) {
-  return new Peer(id, PEER_OPTS);
 }
 
 export function parseRoomFromUrl() {
@@ -68,207 +35,68 @@ export function rememberHost(id) {
   }
 }
 
-export function hostRoom(handlers, existingId) {
-  const conns = new Map();
-  let peer = null;
-  let id = existingId || "";
-  let dead = false;
-  let opened = false;
-  let attempt = 0;
+function openRoom(id, handlers, isHost) {
+  const room = troJoin(TRO, id);
+  const bus = room.makeAction("d");
 
-  function each(fn, exceptId) {
-    for (const [pid, c] of conns) {
-      if (exceptId && pid === exceptId) continue;
-      if (c.open) fn(c, pid);
-    }
-  }
-
-  function attach(c) {
-    const pid = c.peer;
-    conns.set(pid, c);
-    const ready = () => handlers.onPeer?.(pid);
-    c.on("open", ready);
-    c.on("data", (data) => handlers.onData?.(data, pid));
-    c.on("close", () => {
-      conns.delete(pid);
-      handlers.onLeft?.(pid);
-    });
-    c.on("error", (err) => handlers.onError?.(err));
-    if (c.open) ready();
-  }
-
-  function dropPeer() {
-    try {
-      peer?.destroy();
-    } catch {
-      /* ignore */
-    }
-    peer = null;
-  }
-
-  function start(preferId) {
-    if (dead || opened) return;
-    attempt += 1;
-    dropPeer();
-    peer = preferId ? makePeer(preferId) : new Peer(PEER_OPTS);
-    const watchdog = setTimeout(() => {
-      if (dead || opened) return;
-      if (attempt < 3) start(null);
-      else handlers.onError?.({ type: "timeout" });
-    }, 5000);
-    peer.on("open", (openId) => {
-      if (dead || opened) return;
-      opened = true;
-      clearTimeout(watchdog);
-      id = openId;
-      api.id = openId;
-      api.myPeerId = openId;
-      rememberHost(openId);
-      handlers.onOpen?.(openId);
-    });
-    peer.on("error", (err) => {
-      if (dead || opened) return;
-      clearTimeout(watchdog);
-      if ((err?.type === "unavailable-id" || err?.type === "network") && attempt < 3) {
-        start(null);
-        return;
-      }
-      handlers.onError?.(err);
-    });
-    peer.on("connection", attach);
-    peer.on("call", (call) => handlers.onCall?.(call));
-  }
+  bus.onMessage = (data, meta) => handlers.onData?.(data, meta?.peerId);
+  room.onPeerJoin = (peerId) => handlers.onPeer?.(peerId);
+  room.onPeerLeave = (peerId) => handlers.onLeft?.(peerId);
 
   const api = {
     id,
-    host: true,
-    myPeerId: id,
+    host: isHost,
+    myPeerId: selfId,
     send(data) {
-      each((c) => c.send(data));
+      bus.send(data);
     },
     sendTo(peerId, data) {
-      const c = conns.get(peerId);
-      if (c?.open) c.send(data);
+      if (peerId) bus.send(data, { target: peerId });
     },
     sendExcept(peerId, data) {
-      each((c) => c.send(data), peerId);
+      const peers = Object.keys(room.getPeers() || {});
+      for (const pid of peers) {
+        if (pid !== peerId) bus.send(data, { target: pid });
+      }
     },
-    connect(peerId) {
-      if (!peerId || !peer) return null;
+    addStream(stream, target) {
       try {
-        return peer.connect(peerId, CONNECT_OPTS);
-      } catch {
-        return null;
-      }
-    },
-    call(peerId, stream) {
-      if (!peerId || !stream || !peer) return null;
-      try {
-        return peer.call(peerId, stream);
-      } catch {
-        return null;
-      }
-    },
-    destroy() {
-      dead = true;
-      for (const c of conns.values()) c.close();
-      conns.clear();
-      dropPeer();
-    },
-  };
-
-  start(existingId || roomId());
-  return api;
-}
-
-export function joinRoom(hostId, handlers) {
-  const myId = guestId();
-  const peer = makePeer(myId);
-  let conn = null;
-  let tries = 0;
-  let opened = false;
-  let destroyed = false;
-  const maxTries = 8;
-
-  function wire(c) {
-    conn = c;
-    c.on("open", () => {
-      if (opened || destroyed) return;
-      opened = true;
-      handlers.onOpen?.(hostId, myId);
-      handlers.onPeer?.();
-    });
-    c.on("data", (data) => handlers.onData?.(data));
-    c.on("close", () => {
-      if (!destroyed && opened) handlers.onLeft?.();
-    });
-    c.on("error", (err) => handlers.onError?.(err));
-    if (c.open && !opened) {
-      opened = true;
-      handlers.onOpen?.(hostId, myId);
-      handlers.onPeer?.();
-    }
-  }
-
-  function tryConnect() {
-    if (destroyed || opened) return;
-    tries += 1;
-    handlers.onStatus?.(`Joining room… (${tries}/${maxTries})`);
-    try {
-      if (conn) {
-        conn.close();
-        conn = null;
-      }
-    } catch {
-      /* ignore */
-    }
-    wire(peer.connect(hostId, CONNECT_OPTS));
-    setTimeout(() => {
-      if (!opened && !destroyed && tries < maxTries) tryConnect();
-      else if (!opened && !destroyed) {
-        handlers.onError?.({ type: "peer-unavailable" });
-      }
-    }, 3500);
-  }
-
-  const api = {
-    id: hostId,
-    host: false,
-    myPeerId: myId,
-    send(data) {
-      if (conn?.open) conn.send(data);
-    },
-    sendTo() {},
-    sendExcept() {},
-    call(peerId, stream) {
-      if (!peerId || !stream) return null;
-      try {
-        return peer.call(peerId, stream);
-      } catch {
-        return null;
-      }
-    },
-    destroy() {
-      destroyed = true;
-      try {
-        conn?.close();
+        room.addStream(stream, target ? { target } : undefined);
       } catch {
         /* ignore */
       }
-      peer.destroy();
+    },
+    removeStream(stream) {
+      try {
+        room.removeStream(stream);
+      } catch {
+        /* ignore */
+      }
+    },
+    onPeerStream(cb) {
+      room.onPeerStream = cb;
+    },
+    call() {
+      return null;
+    },
+    destroy() {
+      try {
+        room.leave();
+      } catch {
+        /* ignore */
+      }
     },
   };
 
-  peer.on("error", (err) => {
-    if (destroyed) return;
-    if (err?.type === "peer-unavailable" && tries < maxTries) {
-      setTimeout(tryConnect, 800);
-      return;
-    }
-    handlers.onError?.(err);
-  });
-  peer.on("open", () => tryConnect());
-  peer.on("call", (call) => handlers.onCall?.(call));
-
+  if (isHost) rememberHost(id);
+  queueMicrotask(() => handlers.onOpen?.(id, selfId));
   return api;
+}
+
+export function hostRoom(handlers, existingId) {
+  return openRoom(existingId || roomId(), handlers, true);
+}
+
+export function joinRoom(hostId, handlers) {
+  return openRoom(hostId, handlers, false);
 }

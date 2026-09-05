@@ -93,7 +93,7 @@ import {
   wasHosting,
   rememberHost,
 } from "./game/net.js";
-import { connectDirectory, startAnnouncer } from "./game/directory.js";
+import { connectDirectory } from "./game/directory.js";
 import {
   bindVoice,
   ensureMic,
@@ -549,7 +549,7 @@ showCrashHints();
 
 let directory = null;
 let publicRooms = [];
-let announcer = null;
+let announceTimer = 0;
 let roomsLooking = false;
 
 function setRoomsStatus(msg, isErr = false) {
@@ -587,14 +587,15 @@ function publicRoomInfo() {
 
 function publishRoom() {
   if (!mp.host || !mp.roomId || mp.visibility !== "public") return;
-  if (!announcer && mp.net?.connect) {
-    announcer = startAnnouncer((id) => mp.net.connect(id), publicRoomInfo);
-  }
+  ensureDirectory();
+  directory?.announce(publicRoomInfo());
+  if (!announceTimer) announceTimer = setInterval(() => directory?.announce(publicRoomInfo()), 4000);
 }
 
 function stopPublishing() {
-  announcer?.stop();
-  announcer = null;
+  if (directory && mp.roomId) directory.unannounce(mp.roomId);
+  clearInterval(announceTimer);
+  announceTimer = 0;
 }
 
 function ensureDirectory() {
@@ -890,10 +891,7 @@ function attachNet(api) {
 }
 
 function voiceTargets() {
-  const ids = [];
-  if (!mp.host && mp.roomId) ids.push(mp.roomId);
-  for (const id of mp.players.keys()) ids.push(id);
-  return ids;
+  return [...mp.players.keys()];
 }
 
 function voiceEnabled() {
@@ -965,10 +963,7 @@ async function handleVoiceCall(call) {
 
 function handleNetData(data, fromId) {
   if (!data || !data.t) return;
-  if (mp.host && fromId) {
-    data = { ...data, from: fromId };
-    if (data.t !== "hello") mp.net.sendExcept(fromId, data);
-  }
+  if (fromId) data = { ...data, from: fromId };
 
   if (data.t === "hello") {
     if (!mp.host || !fromId) return;
@@ -1194,7 +1189,7 @@ let hostGen = 0;
 
 function openHostLobby(existingId, opts = {}) {
   const gen = ++hostGen;
-  closeDirectory();
+  if (opts.visibility === "private") closeDirectory();
   closeRoom();
   mp.active = true;
   mp.host = true;
@@ -1205,34 +1200,30 @@ function openHostLobby(existingId, opts = {}) {
   selectLobbyMode("guess");
   showLobby();
   setLobbyStatus("Creating room…");
-  const boot = () => {
-    if (gen !== hostGen) return;
-    const api = hostRoom({
-      onOpen(id) {
-        if (gen !== hostGen) return;
-        mp.roomId = id;
-        mp.myId = id;
-        rememberHost(id);
-        if (mp.visibility === "private") history.replaceState(null, "", `#r=${id}`);
-        else history.replaceState(null, "", location.pathname + location.search);
-        el.lobbyLink.value = roomLink(id);
-        publishRoom();
-        renderLobby();
-        setLobbyStatus(
-          mp.visibility === "private"
-            ? `Private room ready — share the code ${id}`
-            : "Public room is live — friends can join from the list"
-        );
-      },
-      onPeer: handlePeerJoined,
-      onData: handleNetData,
-      onCall: handleVoiceCall,
-      onLeft: handlePeerLeft,
-      onError: handleNetError,
-    }, existingId);
-    attachNet(api);
-  };
-  setTimeout(boot, 450);
+  const api = hostRoom({
+    onOpen(id, myId) {
+      if (gen !== hostGen) return;
+      mp.roomId = id;
+      mp.myId = myId || api.myPeerId || id;
+      rememberHost(id);
+      if (mp.visibility === "private") history.replaceState(null, "", `#r=${id}`);
+      else history.replaceState(null, "", location.pathname + location.search);
+      el.lobbyLink.value = roomLink(id);
+      publishRoom();
+      renderLobby();
+      setLobbyStatus(
+        mp.visibility === "private"
+          ? `Private room ready — share the code ${id}`
+          : "Public room is live — friends can join from the list"
+      );
+    },
+    onPeer: handlePeerJoined,
+    onData: handleNetData,
+    onCall: handleVoiceCall,
+    onLeft: handlePeerLeft,
+    onError: handleNetError,
+  }, existingId);
+  attachNet(api);
 }
 
 function openGuestLobby(id) {

@@ -11,11 +11,11 @@ let net = null;
 let stream = null;
 let talking = false;
 let denied = false;
-const calls = new Map();
 const speakers = new Map();
 
 export function bindVoice(api) {
   net = api;
+  net?.onPeerStream?.((remote, id) => playRemote(id, remote));
 }
 
 export function isTalking() {
@@ -61,77 +61,31 @@ function playRemote(id, remote) {
   audio.play().catch(() => {});
 }
 
-function dropPeer(id) {
-  const call = calls.get(id);
-  try {
-    call?.close();
-  } catch {
-    /* ignore */
-  }
-  calls.delete(id);
-  const audio = speakers.get(id);
-  if (audio) {
-    audio.pause();
-    audio.srcObject = null;
-    speakers.delete(id);
-  }
-}
+export function answerCall() {}
 
-function hookCall(id, call) {
-  if (!id || !call) return;
-  const prev = calls.get(id);
-  if (prev && prev !== call) {
-    try {
-      prev.close();
-    } catch {
-      /* ignore */
-    }
-  }
-  calls.set(id, call);
-  call.on("stream", (remote) => playRemote(id, remote));
-  call.on("close", () => dropPeer(id));
-  call.on("error", () => dropPeer(id));
-}
-
-export function answerCall(call) {
-  if (!call) return;
-  try {
-    if (stream) call.answer(stream);
-    else call.answer();
-  } catch {
-    return;
-  }
-  hookCall(call.peer, call);
-}
-
-export function syncVoiceCalls(peerIds = []) {
+export function syncVoiceCalls() {
   if (!net || !stream) return;
-  const mine = net.myPeerId || "";
-  const want = new Set(peerIds.filter((id) => id && id !== mine));
-  for (const id of [...calls.keys()]) {
-    if (!want.has(id)) dropPeer(id);
-  }
-  for (const id of want) {
-    if (calls.has(id)) continue;
-    if (mine && mine < id) {
-      try {
-        hookCall(id, net.call(id, stream));
-      } catch {
-        /* ignore */
-      }
-    }
-  }
+  net.addStream?.(stream);
 }
 
 export function dropVoicePeer(id) {
-  if (id) dropPeer(id);
+  const audio = speakers.get(id);
+  if (!audio) return;
+  audio.pause();
+  audio.srcObject = null;
+  speakers.delete(id);
 }
 
 export function destroyVoice() {
   talking = false;
   denied = false;
-  for (const id of [...calls.keys()]) dropPeer(id);
+  for (const id of [...speakers.keys()]) dropVoicePeer(id);
   if (stream) {
+    try {
+      net?.removeStream?.(stream);
+    } catch {
+      /* ignore */
+    }
     for (const t of stream.getAudioTracks()) t.stop();
     stream = null;
   }
