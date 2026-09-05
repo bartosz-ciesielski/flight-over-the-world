@@ -2094,7 +2094,7 @@ function moveStick(clientX, clientY) {
   const ny = dy / max;
   const dead = 0.12;
   touch.roll = Math.abs(nx) < dead ? 0 : nx;
-  touch.pitch = Math.abs(ny) < dead ? 0 : -ny;
+  touch.pitch = Math.abs(ny) < dead ? 0 : ny;
   if (el.stickKnob) el.stickKnob.style.transform = `translate(${dx}px, ${dy}px)`;
 }
 
@@ -2205,13 +2205,13 @@ function animate() {
 
   const flying = !menuOpen && !paused && !guessOpen && !crashed && !finished;
 
-  // sterowanie WASD (jak w GTA) — bez myszy
+  // sterowanie lotnicze: W / góra = drążek od siebie = nos w dół
   const keyRoll =
     (keys.has("d") || keys.has("arrowright") ? 1 : 0) -
     (keys.has("a") || keys.has("arrowleft") ? 1 : 0);
   const keyPitch =
-    (keys.has("w") || keys.has("arrowup") ? 1 : 0) -
-    (keys.has("s") || keys.has("arrowdown") ? 1 : 0);
+    (keys.has("s") || keys.has("arrowdown") ? 1 : 0) -
+    (keys.has("w") || keys.has("arrowup") ? 1 : 0);
   const rollIn = keyRoll || touch.roll;
   const pitchIn = keyPitch || touch.pitch;
   ctrl.roll += (rollIn - ctrl.roll) * Math.min(1, 6 * dt);
