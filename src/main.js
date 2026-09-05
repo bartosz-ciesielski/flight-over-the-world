@@ -88,6 +88,7 @@ import {
 import {
   parseRoomFromUrl,
   roomLink,
+  setRoomUrl,
   hostRoom,
   joinRoom,
   wasHosting,
@@ -705,7 +706,7 @@ function escapeHtml(s) {
 }
 
 function showNick(opts = {}) {
-  pendingJoinId = opts.roomId || "";
+  pendingJoinId = opts.roomId || parseRoomFromUrl() || pendingJoinId || "";
   menuOpen = true;
   el.landing.classList.add("hidden");
   el.menu.classList.add("hidden");
@@ -734,7 +735,7 @@ function submitNick() {
   }
   mp.myName = name;
   storeNick(name);
-  const joinId = pendingJoinId;
+  const joinId = pendingJoinId || parseRoomFromUrl();
   pendingJoinId = "";
   if (joinId) {
     if (wasHosting(joinId)) openHostLobby(joinId);
@@ -759,7 +760,7 @@ function showLanding() {
   carousel.setActive(false);
   lobbyCarousel.setActive(false);
   rememberHost("");
-  history.replaceState(null, "", location.pathname + location.search);
+  setRoomUrl("");
 }
 
 function showRooms() {
@@ -775,7 +776,7 @@ function showRooms() {
   carousel.setActive(false);
   lobbyCarousel.setActive(false);
   rememberHost("");
-  history.replaceState(null, "", location.pathname + location.search);
+  setRoomUrl("");
   ensureDirectory();
   renderRoomList();
 }
@@ -1351,7 +1352,7 @@ function openHostLobby(existingId, opts = {}) {
       mp.roomId = id;
       mp.myId = myId || api.myPeerId || id;
       rememberHost(id);
-      history.replaceState(null, "", `#r=${id}`);
+      setRoomUrl(id);
       el.lobbyLink.value = roomLink(id);
       publishRoom();
       renderLobby();
@@ -1381,7 +1382,7 @@ function openGuestLobby(id) {
   showLobby();
   el.lobbyLink.value = roomLink(id);
   setLobbyStatus("Joining room…");
-  history.replaceState(null, "", `#r=${id}`);
+  setRoomUrl(id);
   const api = joinRoom(id, {
     onStatus(msg) {
       setLobbyStatus(msg);

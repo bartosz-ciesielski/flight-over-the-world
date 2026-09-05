@@ -7,15 +7,26 @@ function roomId() {
 }
 
 export function parseRoomFromUrl() {
+  const fromQuery = new URLSearchParams(location.search).get("r");
+  if (fromQuery) return fromQuery;
   const h = location.hash.replace(/^#/, "");
+  if (!h) return "";
   const q = new URLSearchParams(h.includes("=") ? h : `r=${h}`);
   return q.get("r") || "";
 }
 
 export function roomLink(id) {
-  const url = new URL(location.href);
-  url.hash = `r=${id}`;
+  const url = new URL(location.origin + location.pathname);
+  url.searchParams.set("r", id);
   return url.toString();
+}
+
+export function setRoomUrl(id) {
+  const url = new URL(location.href);
+  if (id) url.searchParams.set("r", id);
+  else url.searchParams.delete("r");
+  url.hash = "";
+  history.replaceState(null, "", url.pathname + url.search);
 }
 
 export function wasHosting(id) {
