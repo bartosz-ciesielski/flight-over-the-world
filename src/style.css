@@ -993,6 +993,121 @@ kbd {
 
 #btn-restart.ghost:hover { background: rgba(243, 234, 214, 0.08); }
 
+.hint-touch { display: none; }
+
+#touch {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+#touch-pause {
+  pointer-events: auto;
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  right: 12px;
+  padding: 10px 14px;
+  background: rgba(18, 14, 10, 0.72);
+  border: 1px solid rgba(243, 234, 214, 0.22);
+  border-radius: 8px;
+  color: var(--paper);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+#stick {
+  pointer-events: auto;
+  position: absolute;
+  left: max(16px, env(safe-area-inset-left));
+  bottom: max(20px, env(safe-area-inset-bottom));
+  width: 132px;
+  height: 132px;
+  border-radius: 50%;
+  background: rgba(18, 14, 10, 0.45);
+  border: 1px solid rgba(243, 234, 214, 0.22);
+  touch-action: none;
+}
+
+#stick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 52px;
+  height: 52px;
+  margin: -26px 0 0 -26px;
+  border-radius: 50%;
+  background: rgba(216, 162, 74, 0.85);
+  border: 1px solid rgba(243, 234, 214, 0.35);
+  pointer-events: none;
+}
+
+.touch-btns {
+  pointer-events: auto;
+  position: absolute;
+  right: max(12px, env(safe-area-inset-right));
+  bottom: max(20px, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.touch-btns button {
+  min-width: 92px;
+  padding: 16px 18px;
+  background: rgba(18, 14, 10, 0.72);
+  border: 1px solid rgba(243, 234, 214, 0.22);
+  border-radius: 10px;
+  color: var(--paper);
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  touch-action: none;
+  user-select: none;
+}
+
+.touch-btns button.held,
+#touch-pause:active {
+  background: var(--gold);
+  color: #1c1710;
+  border-color: var(--gold);
+}
+
+#touch-talk { display: none; }
+#touch.talk #touch-talk { display: block; }
+
+@media (hover: none), (pointer: coarse), (max-width: 720px) {
+  .hint-desk { display: none; }
+  .hint-touch { display: block; }
+  #touch.show { display: block; }
+
+  #f-instruments {
+    left: 10px;
+    right: auto;
+    top: max(12px, env(safe-area-inset-top));
+    bottom: auto;
+    gap: 6px;
+  }
+
+  .gauge {
+    width: 62px;
+    height: 62px;
+  }
+
+  #f-center {
+    top: max(80px, calc(env(safe-area-inset-top) + 68px));
+  }
+
+  .f-box {
+    min-width: 0;
+    padding: 7px 10px;
+  }
+
+  .f-box span:last-child { font-size: 16px; }
+}
+
 @media (max-width: 720px), (max-height: 820px) {
   #menu,
   #landing,

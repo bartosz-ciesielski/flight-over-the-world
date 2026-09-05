@@ -336,6 +336,13 @@ const el = {
   lobbyModeDesc: document.getElementById("lobby-mode-desc"),
   lobbyCity: document.getElementById("lobby-city"),
   voiceInd: document.getElementById("voice-ind"),
+  touch: document.getElementById("touch"),
+  touchPause: document.getElementById("touch-pause"),
+  stick: document.getElementById("stick"),
+  stickKnob: document.getElementById("stick-knob"),
+  touchBoost: document.getElementById("touch-boost"),
+  touchBrake: document.getElementById("touch-brake"),
+  touchTalk: document.getElementById("touch-talk"),
   lobbyCarCanvas: document.getElementById("lobby-carousel-canvas"),
   lobbyCarPrev: document.getElementById("lobby-car-prev"),
   lobbyCarNext: document.getElementById("lobby-car-next"),
@@ -2038,6 +2045,91 @@ window.addEventListener("keyup", (e) => {
 });
 window.addEventListener("blur", () => stopTalk());
 
+const touch = { roll: 0, pitch: 0, boost: false, brake: false, pid: null };
+
+function resetStick() {
+  touch.roll = 0;
+  touch.pitch = 0;
+  touch.pid = null;
+  if (el.stickKnob) el.stickKnob.style.transform = "";
+}
+
+function moveStick(clientX, clientY) {
+  if (!el.stick) return;
+  const r = el.stick.getBoundingClientRect();
+  const cx = r.left + r.width / 2;
+  const cy = r.top + r.height / 2;
+  let dx = clientX - cx;
+  let dy = clientY - cy;
+  const max = r.width * 0.42;
+  const mag = Math.hypot(dx, dy);
+  if (mag > max) {
+    dx = (dx / mag) * max;
+    dy = (dy / mag) * max;
+  }
+  const nx = dx / max;
+  const ny = dy / max;
+  const dead = 0.12;
+  touch.roll = Math.abs(nx) < dead ? 0 : nx;
+  touch.pitch = Math.abs(ny) < dead ? 0 : -ny;
+  if (el.stickKnob) el.stickKnob.style.transform = `translate(${dx}px, ${dy}px)`;
+}
+
+function bindHold(btn, down, up) {
+  if (!btn) return;
+  const start = (e) => {
+    e.preventDefault();
+    btn.setPointerCapture(e.pointerId);
+    btn.classList.add("held");
+    down();
+  };
+  const end = (e) => {
+    e.preventDefault();
+    btn.classList.remove("held");
+    up();
+  };
+  btn.addEventListener("pointerdown", start);
+  btn.addEventListener("pointerup", end);
+  btn.addEventListener("pointercancel", end);
+}
+
+if (el.stick) {
+  el.stick.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    touch.pid = e.pointerId;
+    el.stick.setPointerCapture(e.pointerId);
+    moveStick(e.clientX, e.clientY);
+  });
+  el.stick.addEventListener("pointermove", (e) => {
+    if (touch.pid !== e.pointerId) return;
+    moveStick(e.clientX, e.clientY);
+  });
+  const endStick = (e) => {
+    if (touch.pid != null && e.pointerId !== touch.pid) return;
+    resetStick();
+  };
+  el.stick.addEventListener("pointerup", endStick);
+  el.stick.addEventListener("pointercancel", endStick);
+}
+bindHold(el.touchBoost, () => { touch.boost = true; }, () => { touch.boost = false; });
+bindHold(el.touchBrake, () => { touch.brake = true; }, () => { touch.brake = false; });
+bindHold(el.touchTalk, () => startTalk(), () => stopTalk());
+el.touchPause?.addEventListener("click", () => setPaused(true));
+el.touch?.addEventListener("touchmove", (e) => e.preventDefault(), { passive: false });
+
+function syncTouchUi() {
+  if (!el.touch) return;
+  const show = !menuOpen && !paused && !guessOpen && !crashed && !finished;
+  el.touch.classList.toggle("hidden", !show);
+  el.touch.classList.toggle("show", show);
+  el.touch.classList.toggle("talk", !!(mp.active && mp.net));
+  if (!show) {
+    resetStick();
+    touch.boost = false;
+    touch.brake = false;
+  }
+}
+
 function restartMode() {
   if (mp.active) {
     backToLobby();
@@ -2091,15 +2183,17 @@ function animate() {
   const flying = !menuOpen && !paused && !guessOpen && !crashed && !finished;
 
   // sterowanie WASD (jak w GTA) — bez myszy
-  const rollIn =
+  const keyRoll =
     (keys.has("d") || keys.has("arrowright") ? 1 : 0) -
     (keys.has("a") || keys.has("arrowleft") ? 1 : 0);
-  const pitchIn =
+  const keyPitch =
     (keys.has("w") || keys.has("arrowup") ? 1 : 0) -
     (keys.has("s") || keys.has("arrowdown") ? 1 : 0);
+  const rollIn = keyRoll || touch.roll;
+  const pitchIn = keyPitch || touch.pitch;
   ctrl.roll += (rollIn - ctrl.roll) * Math.min(1, 6 * dt);
   ctrl.pitch += (pitchIn - ctrl.pitch) * Math.min(1, 6 * dt);
-  ctrl.throttle = keys.has("shift") ? 1 : keys.has("control") ? -1 : 0;
+  ctrl.throttle = touch.boost || keys.has("shift") ? 1 : touch.brake || keys.has("control") ? -1 : 0;
 
   if (flying) plane.update(dt, ctrl);
 
@@ -2328,13 +2422,20 @@ function animate() {
 
   // HUD
   if (frameCount % 2 === 0) updateHud(agl);
+  if (frameCount % 4 === 0) syncTouchUi();
 
-  if (menuOpen && !awaitingSnap) {
+  if (menuOpen) {
     tiles.group.visible = false;
     if (planeMesh) planeMesh.visible = false;
+    if (awaitingSnap) {
+      tiles.setResolutionFromRenderer(camera, renderer);
+      tiles.setCamera(camera);
+      camera.updateMatrixWorld();
+      tiles.update();
+    }
   } else {
     tiles.group.visible = true;
-    if (planeMesh && !crashed) planeMesh.visible = !menuOpen;
+    if (planeMesh && !crashed) planeMesh.visible = true;
     tiles.setResolutionFromRenderer(camera, renderer);
     tiles.setCamera(camera);
     camera.updateMatrixWorld();

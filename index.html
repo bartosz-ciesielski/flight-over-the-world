@@ -118,7 +118,8 @@
           <button id="start-btn" type="button">Start</button>
         </div>
         <p id="menu-error"></p>
-          <p class="hint"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> fly · <kbd>Shift</kbd> boost · <kbd>Ctrl</kbd> brake · <kbd>Esc</kbd> pause</p>
+          <p class="hint hint-desk"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> fly · <kbd>Shift</kbd> boost · <kbd>Ctrl</kbd> brake · <kbd>Esc</kbd> pause</p>
+          <p class="hint hint-touch">Drag the stick to fly · Boost / Brake</p>
       </div>
     </div>
 
@@ -175,6 +176,18 @@
       <div id="f-center">
         <div class="f-box" id="f-timer-box"><span class="f-label">Time left</span><span id="f-timer">10:00</span></div>
         <div class="f-box" id="f-dist-box"><span class="f-label">To target</span><span id="f-dist">–</span></div>
+      </div>
+    </div>
+
+    <div id="touch" class="hidden">
+      <button id="touch-pause" type="button">Pause</button>
+      <div id="stick">
+        <div id="stick-knob"></div>
+      </div>
+      <div class="touch-btns">
+        <button id="touch-boost" type="button">Boost</button>
+        <button id="touch-brake" type="button">Brake</button>
+        <button id="touch-talk" type="button">Talk</button>
       </div>
     </div>
 
