@@ -595,11 +595,13 @@ export function pickContinentStart() {
 
 export function guessHoldAlt(scope) {
   // Cities and parks sit well below this; snap then drops to ~350 m AGL.
+  // World must clear Everest / Andes before tiles exist — probe also starts at 10 km.
   if (scope === "pl") {
     const [lon0, lat0, lon1, lat1] = pack.country.bbox;
     return Math.hypot(lon1 - lon0, lat1 - lat0) > 25 ? 5200 : 2800;
   }
-  return 5200;
+  if (scope === "eu") return 5200;
+  return 9500;
 }
 
 detectLocale();

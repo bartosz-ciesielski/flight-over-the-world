@@ -308,8 +308,11 @@ let guessScope = "pl"; // pl | world
 let awaitingSnap = false; // guess: menu/overlay czeka na pomiar terenu, start od razu na ~350 m
 let awaitingSnapSince = 0;
 let snapLastGh = null; // dosadzenie dopiero gdy pomiar terenu się ustabilizuje (kafelki się doprecyzują)
+let snapBestGh = null; // najwyższa zmierzona powierzchnia — nie wracamy pod LOD-parent
 let snapStableCount = 0;
 let snapFirstAt = 0;
+let snapLiftUntil = 0; // po locku jeszcze chwilę podnoś, jeśli dzieci kafelków wskoczą wyżej
+let lastSurf = null;
 let geoCache = null;
 let geoCacheScope = null;
 let geoLoadId = 0;
@@ -2568,8 +2571,11 @@ function resetFlight(latDeg, lonDeg) {
   groundAlt = TERRAIN_ALT;
   pendingSnap = true; // udany, ustabilizowany pomiar terenu dosadzi samolot na właściwą wysokość
   snapLastGh = null;
+  snapBestGh = null;
   snapStableCount = 0;
   snapFirstAt = 0;
+  snapLiftUntil = 0;
+  lastSurf = null;
   crashed = false;
   crashStreak = 0;
   crashGraceUntil = 0;
@@ -2641,26 +2647,58 @@ const _probePoint = new Vector3();
 const _probeInv = new Matrix4();
 const _probeLla = {};
 
-function probeGround(lat, lon, refHeight) {
+function collectProbeHits(lat, lon, refHeight) {
+  if (!tiles) return [];
   WGS84_ELLIPSOID.getCartographicToPosition(lat, lon, refHeight + 100, _probeOrigin);
   _probeOrigin.applyMatrix4(tiles.group.matrixWorld);
   _probeDir.copy(_probeOrigin).normalize().negate();
   raycaster.set(_probeOrigin, _probeDir);
-  raycaster.far = refHeight + 1200;
+  raycaster.far = refHeight + 2500;
   const prevFirst = raycaster.firstHitOnly;
   raycaster.firstHitOnly = false;
   const hits = raycaster.intersectObject(tiles.group, true);
   raycaster.firstHitOnly = prevFirst;
-  if (!hits.length) return null;
+  return hits;
+}
+
+function hitEllipsoidHeight(hit) {
+  _probePoint.copy(hit.point).applyMatrix4(_probeInv);
+  WGS84_ELLIPSOID.getPositionToCartographic(_probePoint, _probeLla);
+  return _probeLla.height;
+}
+
+function probeColumn(lat, lon, refHeight) {
+  const hits = collectProbeHits(lat, lon, refHeight);
+  if (!hits.length) return { surface: null, ground: null };
   _probeInv.copy(tiles.group.matrixWorld).invert();
-  let best = Infinity;
+  const surface = hitEllipsoidHeight(hits[0]);
+  let ground = Infinity;
   const n = Math.min(hits.length, 12);
   for (let i = 0; i < n; i++) {
-    _probePoint.copy(hits[i].point).applyMatrix4(_probeInv);
-    WGS84_ELLIPSOID.getPositionToCartographic(_probePoint, _probeLla);
-    if (_probeLla.height < best) best = _probeLla.height;
+    const h = hitEllipsoidHeight(hits[i]);
+    if (h < ground) ground = h;
   }
-  return Number.isFinite(best) ? best : null;
+  return {
+    surface: Number.isFinite(surface) ? surface : null,
+    ground: Number.isFinite(ground) ? ground : null,
+  };
+}
+
+// Pierwszy hit z nieba = widoczna powierzchnia (dach / szczyt).
+function probeSurface(lat, lon, refHeight) {
+  return probeColumn(lat, lon, refHeight).surface;
+}
+
+function probeGround(lat, lon, refHeight) {
+  return probeColumn(lat, lon, refHeight).ground;
+}
+
+function tilesBusy() {
+  if (!tiles) return true;
+  if (tiles.isLoading) return true;
+  const s = tiles.stats;
+  if (!s) return false;
+  return (s.downloading || 0) > 0 || (s.queued || 0) > 0 || (s.parsing || 0) > 0;
 }
 
 function adoptGround(gh) {
@@ -2787,7 +2825,7 @@ function syncPlaceBadge() {
 }
 
 function placeBeaconAt(latDeg, lonDeg) {
-  const gh = probeGround(latDeg * (Math.PI / 180), lonDeg * (Math.PI / 180), TERRAIN_ALT + 200);
+  const gh = probeSurface(latDeg * (Math.PI / 180), lonDeg * (Math.PI / 180), 2500);
   const base = gh !== null ? gh : TERRAIN_ALT;
   beaconGrounded = gh !== null;
   const m = frameAt(latDeg * (Math.PI / 180), lonDeg * (Math.PI / 180), base, 0, 0, 0);
@@ -3611,14 +3649,33 @@ const offset = new Vector3();
 const camFramePos = new Vector3();
 const camFrameQuat = new Quaternion();
 const camFrameScale = new Vector3();
+if (import.meta.env.DEV) {
+  window.__beginFlight = (lat, lon) => {
+    mode = "guess";
+    guessScope = "world";
+    paused = false;
+    crashed = false;
+    finished = false;
+    menuOpen = false;
+    el.menu?.classList.add("hidden");
+    el.landing?.classList.add("hidden");
+    el.lobby?.classList.add("hidden");
+    beginFlight(lat, lon);
+  };
+}
 window.__foeDebug = () => ({
   state: "dbg",
   lat: plane?.latDeg,
   lon: plane?.lonDeg,
   h: plane?.height,
+  gh: groundAlt,
+  surf: lastSurf,
+  agl: plane ? plane.height - groundAlt : null,
+  pendingSnap,
+  awaitingSnap,
+  snapBestGh,
   speed: plane?.speed,
   menuOpen,
-  awaitingSnap,
   guessOpen,
   paused,
   crashed,
@@ -3850,29 +3907,47 @@ function tickFrame() {
   }
 
   if ((!menuOpen || awaitingSnap) && frameCount % 8 === 0) {
-    const refH = pendingSnap || awaitingSnap ? Math.max(plane.height, spawnHoldAlt()) : plane.height;
-    const gh = probeGround(plane.lat, plane.lon, refH);
-    if (gh !== null) {
+    const snapping = pendingSnap || awaitingSnap;
+    const refH = snapping
+      ? Math.max(plane.height, spawnHoldAlt(), 10000)
+      : Math.max(plane.height, 2500);
+    const col = probeColumn(plane.lat, plane.lon, refH);
+    const surf = col.surface;
+    if (surf !== null) lastSurf = surf;
+    const gh = snapping ? surf : col.ground;
+    if (
+      surf !== null &&
+      !pendingSnap &&
+      snapLiftUntil > performance.now() &&
+      plane.height < surf + 80
+    ) {
+      plane.height = surf + snapAgl();
+      adoptGround(surf);
+      armCrashGrace(1200);
+    } else if (gh !== null) {
       adoptGround(gh);
-      if (pendingSnap) {
-        plane.height = gh + snapAgl();
-        if (!snapFirstAt) snapFirstAt = performance.now();
-        if (snapLastGh !== null && Math.abs(gh - snapLastGh) < 25) {
-          snapStableCount += 1;
-        } else {
-          snapStableCount = 0;
-        }
-        snapLastGh = gh;
-        const need = tiles.isLoading ? 4 : 2;
-        const waited = performance.now() - snapFirstAt > 1500;
-        if (snapStableCount >= need && waited) {
-          pendingSnap = false;
-          armCrashGrace();
-          if (awaitingSnap) {
-            awaitingSnap = false;
-            if (mp.active && mp.inRound) reportSnapped();
-            else finishSnapStart();
-          }
+    }
+    if (pendingSnap && surf !== null) {
+      snapBestGh = snapBestGh == null ? surf : Math.max(snapBestGh, surf);
+      plane.height = snapBestGh + snapAgl();
+      if (!snapFirstAt) snapFirstAt = performance.now();
+      if (snapLastGh !== null && Math.abs(surf - snapLastGh) < 30) {
+        snapStableCount += 1;
+      } else {
+        snapStableCount = 0;
+      }
+      snapLastGh = surf;
+      const busy = tilesBusy();
+      const need = busy ? 8 : 4;
+      const waited = performance.now() - snapFirstAt > (busy ? 2800 : 1800);
+      if (snapStableCount >= need && waited) {
+        pendingSnap = false;
+        snapLiftUntil = performance.now() + 12000;
+        armCrashGrace();
+        if (awaitingSnap) {
+          awaitingSnap = false;
+          if (mp.active && mp.inRound) reportSnapped();
+          else finishSnapStart();
         }
       }
     }
@@ -3880,10 +3955,17 @@ function tickFrame() {
   if (awaitingSnap && performance.now() - awaitingSnapSince > 20000) {
     awaitingSnap = false;
     pendingSnap = false;
+    snapLiftUntil = performance.now() + 15000;
     armCrashGrace();
-    const gh = Number.isFinite(snapLastGh) ? snapLastGh : TERRAIN_ALT;
-    plane.height = gh + snapAgl();
-    groundAlt = gh;
+    const gh = Number.isFinite(snapBestGh)
+      ? snapBestGh
+      : Number.isFinite(snapLastGh)
+        ? snapLastGh
+        : null;
+    if (gh !== null) {
+      plane.height = gh + snapAgl();
+      groundAlt = gh;
+    }
     if (mp.active && mp.inRound) reportSnapped();
     else finishSnapStart();
   }
@@ -4037,6 +4119,12 @@ function tickFrame() {
     tilePool: tilePool.debug(),
     explosions: explosions.length,
     crashed,
+    pendingSnap,
+    awaitingSnap,
+    snapBestGh,
+    surf: lastSurf,
+    agl: plane.height - groundAlt,
+    buried: lastSurf != null && plane.height < lastSurf + 20,
     audio: engineDebug(),
     music: musicDebug(),
     camDist: camera.position.distanceTo(planePos),
