@@ -59,7 +59,7 @@ export function loadTileSlots() {
   ]);
   const google = unique([
     ...splitKeys(import.meta.env.VITE_GOOGLE_TILES_KEYS),
-    ...(ion.length ? [] : splitKeys(import.meta.env.VITE_GOOGLE_MAPS_KEY)),
+    ...splitKeys(import.meta.env.VITE_GOOGLE_MAPS_KEY),
   ]);
   return [
     ...ion.map((token) => ({ kind: "ion", token })),
@@ -82,6 +82,7 @@ export class TileKeyPool {
     this.rotating = null;
     this.switches = 0;
     this.lastErr = "";
+    this.pausedUntil = 0;
     this.onSwitch = null;
   }
 
@@ -195,16 +196,9 @@ export class TileKeyPool {
         }
         const parsed = new URL(rootUrl);
         const key = parsed.searchParams.get("key") || "";
-        let session = parsed.searchParams.get("session") || "";
-        try {
-          const root = await fetch(rootUrl);
-          if (root.ok) {
-            const tileset = await root.json();
-            session = extractSession(tileset) || session;
-          }
-        } catch {
-          /* ion already gave a usable key — do not kill the slot on a busy root.json */
-        }
+        const session = parsed.searchParams.get("session") || "";
+        // Do not fetch root.json here — that URL is the first thing Google
+        // rate-limits, and the renderer will load it once on its own.
         if (!key) {
           this.markStatus(slot, 401);
           return null;
@@ -235,28 +229,30 @@ export class TileKeyPool {
 
   rememberPluginSession(plugin, rootUrl) {
     const slot = this.current;
-    if (!slot || slot.session?.key) return;
-    const key = plugin?.apiToken || plugin?.auth?.apiToken || "";
-    const session = plugin?.auth?.sessionToken || "";
+    if (!slot) return;
+    const key = plugin?.apiToken || plugin?.auth?.apiToken || slot.session?.key || "";
+    const session = plugin?.auth?.sessionToken || slot.session?.session || "";
     if (!key && !session) return;
-    slot.session = { key, session, rootUrl: rootUrl || "" };
+    slot.session = {
+      key,
+      session,
+      rootUrl: rootUrl || slot.session?.rootUrl || "",
+    };
   }
 
   applySessionToUrl(url) {
     const auth = this.current?.session;
-    if (!auth?.key && !auth?.session) return url;
     try {
       const u = new URL(url, "https://tile.googleapis.com");
       if (u.hostname !== "tile.googleapis.com") return url;
-      if (auth.key) u.searchParams.set("key", auth.key);
+      if (auth?.key) u.searchParams.set("key", auth.key);
       // Google rejects root.json when a session query is present (HTTP 400).
-      const path = u.pathname;
-      const needsSession =
-        u.searchParams.has("session") ||
-        path.includes("/files/") ||
-        /\.glb$/i.test(path);
-      if (auth.session && needsSession) u.searchParams.set("session", auth.session);
-      else u.searchParams.delete("session");
+      // Never strip a session that the tileset already put on a child URL.
+      const isRoot = /\/root\.json$/i.test(u.pathname);
+      if (isRoot) u.searchParams.delete("session");
+      else if (auth?.session && !u.searchParams.get("session")) {
+        u.searchParams.set("session", auth.session);
+      }
       return u.toString();
     } catch {
       return url;
@@ -312,6 +308,10 @@ export class TileKeyPool {
 
   async fetchData(url, options) {
     if (!this.current) return fetch(url, options);
+    const wait = this.pausedUntil - Date.now();
+    if (wait > 0) {
+      await new Promise((r) => setTimeout(r, Math.min(wait, 8000)));
+    }
     if (!this.current.session && !this.current.dead) {
       await this.ensureSession(this.current);
     }
@@ -321,38 +321,79 @@ export class TileKeyPool {
         return new Response("", { status: 401, statusText: "No map key" });
       }
     }
+    if (options?.signal?.aborted) {
+      return new Response("", { status: 499, statusText: "Aborted" });
+    }
     let last = null;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      if (options?.signal?.aborted) {
-        return last || new Response("", { status: 499, statusText: "Aborted" });
-      }
-      try {
-        last = await fetch(this.applySessionToUrl(url), options);
-      } catch (err) {
-        last = new Response("", { status: 599, statusText: String(err?.message || err) });
-      }
-      if (last.ok) {
-        // success clears the throttle history so one good streak never
-        // escalates into the 15-minute cooldown
-        if (this.current) this.current.fails = 0;
-        return last;
-      }
-      if (last.status === 429 || last.status === 502 || last.status === 503) {
-        this.lastErr = String(last.status);
-        await new Promise((r) => setTimeout(r, 250 * (attempt + 1)));
-        continue;
-      }
-      if (last.status === 401 || last.status === 403) {
-        const slot = this.current;
-        if (slot) slot.session = null;
-        const refreshed = await this.ensureSession(slot);
-        if (refreshed) continue;
-        const switched = await this.rotate(last.status);
-        if (switched) continue;
+    try {
+      last = await fetch(this.applySessionToUrl(url), options);
+    } catch (err) {
+      last = new Response("", { status: 599, statusText: String(err?.message || err) });
+    }
+    if (last.ok) {
+      if (this.current) this.current.fails = 0;
+      this.#rememberSessionFromResponse(url, last);
+      return last;
+    }
+    if (last.status === 429 || last.status === 502 || last.status === 503) {
+      this.lastErr = String(last.status);
+      this.pausedUntil = Date.now() + (last.status === 429 ? 8000 : 2500);
+      const switched = await this.rotate(last.status);
+      if (switched && !options?.signal?.aborted) {
+        try {
+          const retry = await fetch(this.applySessionToUrl(url), options);
+          if (retry.ok && this.current) {
+            this.current.fails = 0;
+            this.#rememberSessionFromResponse(url, retry);
+          }
+          return retry;
+        } catch (err) {
+          return new Response("", { status: 599, statusText: String(err?.message || err) });
+        }
       }
       return last;
     }
-    return last || new Response("", { status: 429, statusText: "Tiles busy" });
+    if (last.status === 401 || last.status === 403) {
+      const slot = this.current;
+      if (slot) slot.session = null;
+      const refreshed = await this.ensureSession(slot);
+      if (refreshed && !options?.signal?.aborted) {
+        try {
+          const retry = await fetch(this.applySessionToUrl(url), options);
+          if (retry.ok) {
+            this.#rememberSessionFromResponse(url, retry);
+            return retry;
+          }
+          last = retry;
+        } catch (err) {
+          last = new Response("", { status: 599, statusText: String(err?.message || err) });
+        }
+      }
+      const switched = await this.rotate(last.status);
+      if (switched && !options?.signal?.aborted) {
+        try {
+          return await fetch(this.applySessionToUrl(url), options);
+        } catch (err) {
+          return new Response("", { status: 599, statusText: String(err?.message || err) });
+        }
+      }
+    }
+    return last;
+  }
+
+  #rememberSessionFromResponse(url, res) {
+    try {
+      const path = new URL(url, "https://tile.googleapis.com").pathname;
+      if (!/root\.json$/i.test(path)) return;
+      res.clone().json().then((tileset) => {
+        const session = extractSession(tileset);
+        if (session && this.current) {
+          this.current.session = { ...(this.current.session || {}), session };
+        }
+      }).catch(() => {});
+    } catch {
+      /* ignore */
+    }
   }
 }
 
@@ -380,6 +421,7 @@ export function applyTileQuality(tiles, mobile = false) {
   if (!tiles) return;
   tiles.errorTarget = mobile ? 10 : TILE_QUALITY.errorTarget;
   tiles.loadSiblings = !mobile;
+  if (tiles.downloadQueue) tiles.downloadQueue.maxJobsPerOrigin = mobile ? 4 : 8;
   if (tiles.parseQueue) tiles.parseQueue.maxJobs = 6;
   tiles.lruCache.maxSize = mobile ? 1600 : TILE_QUALITY.cacheTiles;
   tiles.lruCache.maxBytesSize = mobile ? 2.8e8 : TILE_QUALITY.cacheBytes;

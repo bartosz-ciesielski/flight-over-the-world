@@ -58,8 +58,8 @@ import {
   loadTileSlots,
   syncTileAuth,
   applyTileQuality,
-  flushTilesForWarp,
 } from "./game/tileAuth.js";
+import { createHoldParentTilesPlugin } from "./game/holdParentTiles.js";
 import { createFreeMap, createMiniMap, paintTrailMap } from "./game/freeMap.js";
 
 // rakieta stoi pionowo (+Y) — połóż ją nosem do przodu (-Z, konwencja lotu)
@@ -218,14 +218,18 @@ function onTileThrottle(status = 429) {
   tile429Count += 1;
   lastTileErr = String(status);
   pendingFailedRetry = true;
+  lastFailedRetryAt = performance.now();
+  tilePool.rotate(status);
 }
 
 function retryFailedTiles(force = false) {
   if (!tiles) return;
   const failed = tiles.stats?.failed || 0;
-  if (!failed || (!force && !pendingFailedRetry)) return;
+  const rootDead = tiles.rootLoadingState === -1;
+  if (!force && !pendingFailedRetry && !failed && !rootDead) return;
   const now = performance.now();
-  if (!force && now - lastFailedRetryAt < 1500) return;
+  const wait = tile429Count || rootDead ? 8000 : 1500;
+  if (!force && now - lastFailedRetryAt < wait) return;
   lastFailedRetryAt = now;
   pendingFailedRetry = false;
   resetFailedTilesSafe();
@@ -234,12 +238,7 @@ function retryFailedTiles(force = false) {
 function resetFailedTilesSafe() {
   if (!tiles) return;
   try {
-    if (tiles.rootLoadingState === -1) tiles.rootLoadingState = 0;
-    if (!(tiles.stats?.failed)) return;
-    tiles.traverse?.((tile) => {
-      if (tile?.internal?.loadingState === -1) tile.internal.loadingState = 0;
-    }, null, false);
-    tiles.stats.failed = 0;
+    tiles.resetFailedTiles?.();
   } catch (err) {
     lastTileErr = String(err?.message || err).slice(0, 220);
   }
@@ -272,14 +271,6 @@ function markStarting() {
 }
 function clearStarting() {
   try { sessionStorage.removeItem(START_FLAG); } catch { /* ignore */ }
-}
-function crashedLastStart() {
-  try {
-    const t = Number(sessionStorage.getItem(START_FLAG) || 0);
-    return t > 0 && Date.now() - t < 60000;
-  } catch {
-    return false;
-  }
 }
 function rememberError(msg) {
   try { sessionStorage.setItem(LAST_ERR, String(msg || "").slice(0, 280)); } catch { /* ignore */ }
@@ -549,6 +540,8 @@ if (import.meta.env.DEV) window.__foeMp = mp;
 
 const ctrl = { roll: 0, pitch: 0, throttle: 0.4 };
 let throttleLever = 0.4;
+let throttleShown = 0.4;
+const THROTTLE_RATE = 0.7;
 const keys = new Set();
 const raycaster = new Raycaster();
 raycaster.firstHitOnly = true;
@@ -861,18 +854,24 @@ function hideFatal() {
 }
 
 function showCrashHints() {
-  const died = crashedLastStart();
+  // Stale session notes must never block the menu. A refresh is not a crash.
   const prev = lastError();
-  if (!died && !prev) return;
-  const text = died
-    ? (prev || "Last start crashed this phone (usually out of memory). Using the lightest graphics — tap Start again.")
-    : prev;
+  if (!prev) return;
+  if (/Phone closed the tab|out of memory|Light mode is on/i.test(prev)) {
+    clearError();
+    clearStarting();
+    hideFatal();
+    if (el.crashNote) {
+      el.crashNote.hidden = true;
+      el.crashNote.textContent = "";
+    }
+    if (el.menuError) el.menuError.textContent = "";
+    return;
+  }
   if (el.crashNote) {
     el.crashNote.hidden = false;
-    el.crashNote.textContent = text;
+    el.crashNote.textContent = prev;
   }
-  if (el.menuError) el.menuError.textContent = text;
-  if (died) showFatal(text);
 }
 
 el.fatalOk?.addEventListener("click", () => hideFatal());
@@ -2264,9 +2263,7 @@ async function init() {
   setLoader("Connecting to map…", 0.4);
   const ready = await tilePool.warmup();
   if (!ready) {
-    loadError = "Cesium ion rejected the map tokens. On each account add Google Photorealistic 3D Tiles (asset 2275207) and create a new token.";
-    setLoader(loadError, 0);
-    return;
+    loadError = "Map servers are busy — starting anyway, terrain will retry";
   }
   setLoader("Start…", 0.4);
 
@@ -2358,7 +2355,8 @@ async function init() {
     compressIndex: true,
   }));
   tiles.registerPlugin(new UpdateOnChangePlugin());
-  tiles.registerPlugin(new UnloadTilesPlugin());
+  tiles.registerPlugin(createHoldParentTilesPlugin());
+  tiles.registerPlugin(new UnloadTilesPlugin({ delay: 6000 }));
   tiles.registerPlugin(new TilesFadePlugin());
   const draco = new DRACOLoader();
   draco.setDecoderPath("https://www.gstatic.com/draco/versioned/decoders/1.5.7/");
@@ -2435,7 +2433,10 @@ async function init() {
   window.__game = { get planeMesh() { return planeMesh; }, get plane() { return plane; }, get camera() { return camera; } };
   window.__scene = scene;
   gameReady = true;
-  showCrashHints();
+  clearStarting();
+  if (/Phone closed the tab|out of memory|Light mode is on/i.test(lastError())) {
+    clearError();
+  }
   } catch (err) {
     console.error(err);
     const msg = "This phone could not start the 3D engine. Try Safari or Chrome, or a computer.";
@@ -2579,7 +2580,8 @@ function resetFlight(latDeg, lonDeg) {
   ctrl.roll = 0;
   ctrl.pitch = 0;
   throttleLever = plane.cruiseT;
-  ctrl.throttle = throttleLever;
+  throttleShown = throttleLever;
+  ctrl.throttle = throttleShown;
   syncThrottleUi();
   camInit = false;
   if (planeMesh) planeMesh.visible = true;
@@ -2685,24 +2687,19 @@ function armCrashGrace(ms = 2500) {
 
 const _rayOrigin = new Vector3();
 const _rayDown = new Vector3();
-function hitTerrainAt(worldPos, margin) {
-  _rayDown.copy(worldPos).normalize().negate();
-  _rayOrigin.copy(worldPos).addScaledVector(_rayDown, -600);
+function bodyHit(radius = 5) {
+  if (!tiles) return false;
+  _rayDown.copy(planePos).normalize().negate();
+  _rayOrigin.copy(planePos).addScaledVector(_rayDown, -radius * 2);
+  const prevFirst = raycaster.firstHitOnly;
+  raycaster.firstHitOnly = false;
+  raycaster.far = radius * 4;
   raycaster.set(_rayOrigin, _rayDown);
-  raycaster.far = 1200;
   const hits = raycaster.intersectObject(tiles.group, true);
-  if (!hits.length) return false;
-  return hits[0].distance - 600 < margin;
-}
-
-const _rightWing = new Vector3();
-const _wingTip = new Vector3();
-function wingHit() {
-  const half = PLANES[selectedPlane].wingspan * 0.45;
-  _rightWing.set(1, 0, 0).applyQuaternion(planeQuat);
-  for (const s of [-1, 1]) {
-    _wingTip.copy(planePos).addScaledVector(_rightWing, s * half);
-    if (hitTerrainAt(_wingTip, 1.5)) return true;
+  raycaster.firstHitOnly = prevFirst;
+  const n = Math.min(hits.length, 8);
+  for (let i = 0; i < n; i++) {
+    if (hits[i].point.distanceTo(planePos) <= radius) return true;
   }
   return false;
 }
@@ -2853,7 +2850,6 @@ function beginFlight(lat, lon) {
   el.menuError.textContent = "Loading terrain…";
   if (selectedPlane !== planeMesh?.userData?.key) loadPlane(selectedPlane);
   resetFlight(lat, lon);
-  flushTilesForWarp(tiles);
   retryFailedTiles(true);
   el.timerBox.classList.toggle("show", mode !== "free");
   el.distBox.classList.remove("show");
@@ -3418,6 +3414,7 @@ window.addEventListener("keydown", (e) => {
   }
   if (menuOpen || paused || guessOpen) return;
   keys.add(k);
+  if (k === "shift" || k === "control") syncThrottleUi();
   if (k === "r" && (crashed || finished)) restartMode();
 });
 window.addEventListener("keyup", (e) => {
@@ -3426,6 +3423,7 @@ window.addEventListener("keyup", (e) => {
   const k = e.key.toLowerCase();
   if (k === "t") stopTalk();
   keys.delete(k);
+  if (k === "shift" || k === "control") syncThrottleUi();
 });
 el.mpOnline?.addEventListener("click", () => {
   if (!mp.active || menuOpen) return;
@@ -3437,14 +3435,29 @@ const touch = { roll: 0, pitch: 0, boost: false, brake: false, pid: null, thr: n
 
 function setThrottleLever(v) {
   throttleLever = Math.max(0, Math.min(1, v));
+  if (!keys.has("shift") && !keys.has("control")) throttleShown = throttleLever;
+  syncThrottleUi();
+}
+
+function throttleTarget() {
+  if (keys.has("shift")) return 1;
+  if (keys.has("control")) return 0;
+  return throttleLever;
+}
+
+function tickThrottle(dt) {
+  const target = throttleTarget();
+  const step = THROTTLE_RATE * dt;
+  if (throttleShown < target) throttleShown = Math.min(target, throttleShown + step);
+  else if (throttleShown > target) throttleShown = Math.max(target, throttleShown - step);
   syncThrottleUi();
 }
 
 function syncThrottleUi() {
   if (el.throttleKnob) {
-    el.throttleKnob.style.bottom = `${throttleLever * 100}%`;
+    el.throttleKnob.style.bottom = `${throttleShown * 100}%`;
   }
-  el.throttleRail?.setAttribute("aria-valuenow", String(Math.round(throttleLever * 100)));
+  el.throttleRail?.setAttribute("aria-valuenow", String(Math.round(throttleShown * 100)));
 }
 
 function syncThrottleVis() {
@@ -3642,13 +3655,7 @@ window.addEventListener("unhandledrejection", (e) => {
   else if (el.menuError) el.menuError.textContent = msg;
 });
 window.addEventListener("pagehide", () => {
-  try {
-    if (sessionStorage.getItem(START_FLAG)) {
-      rememberError("Phone closed the tab while loading terrain — usually out of memory. Light mode is on; tap Start again.");
-    }
-  } catch {
-    /* ignore */
-  }
+  if (isMobile && awaitingSnap) markStarting();
 });
 
 function animate() {
@@ -3681,11 +3688,12 @@ function tickFrame() {
   const pitchIn = keyPitch || touch.pitch;
   ctrl.roll += (rollIn - ctrl.roll) * Math.min(1, 6 * dt);
   ctrl.pitch += (pitchIn - ctrl.pitch) * Math.min(1, 6 * dt);
-  if (flying) {
-    if (keys.has("shift")) setThrottleLever(throttleLever + dt * 0.55);
-    else if (keys.has("control")) setThrottleLever(throttleLever - dt * 0.55);
+  if (flying) tickThrottle(dt);
+  else if (throttleShown !== throttleLever) {
+    throttleShown = throttleLever;
+    syncThrottleUi();
   }
-  ctrl.throttle = throttleLever;
+  ctrl.throttle = throttleShown;
 
   if (flying) {
     // równe kroki — duży dt przy ładowaniu kafelków nie robi „przeskoku” przy nitro
@@ -3885,11 +3893,11 @@ function tickFrame() {
     armCrashGrace(1400);
   }
   const canCrash = flying && !pendingSnap && performance.now() > crashGraceUntil;
-  const hitGround = canCrash && agl < 4;
-  const hitBuilding = canCrash && wingHit();
+  const hitGround = canCrash && agl < 3;
+  const hitBuilding = canCrash && agl < 80 && bodyHit(4.5);
   if (hitGround || hitBuilding) crashStreak += 1;
   else crashStreak = 0;
-  if (crashStreak >= 3) crash();
+  if (crashStreak >= 8) crash();
 
   // aktywne wybuchy
   for (let i = explosions.length - 1; i >= 0; i--) {

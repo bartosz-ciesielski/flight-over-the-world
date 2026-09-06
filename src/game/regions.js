@@ -1,5 +1,12 @@
 // Kraj / kontynent do trybu Guess — ze strefy czasowej (miejsce) albo języka.
 
+import {
+  COUNTRY_EXTRA_CITIES,
+  COUNTRY_PLACES,
+  CONTINENT_PLACES,
+  WORLD_PLACES,
+} from "./places.js";
+
 export const COUNTRIES = {
   PL: {
     name: "Poland", flag: "🇵🇱", continent: "europe",
@@ -490,8 +497,52 @@ function countryFromLanguage(tag) {
 }
 
 function pickCity(list) {
+  if (!list?.length) return { lat: 52.23, lon: 21.01 };
   const [lat, lon] = list[Math.floor(Math.random() * list.length)];
   return { lat, lon };
+}
+
+export function mergePlaces(...lists) {
+  const out = [];
+  const seen = new Set();
+  for (const list of lists) {
+    for (const p of list || []) {
+      const key = `${Number(p[0]).toFixed(2)},${Number(p[1]).toFixed(2)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(p);
+    }
+  }
+  return out;
+}
+
+export function placesForCountry(code) {
+  const country = COUNTRIES[code];
+  if (!country) return [];
+  return mergePlaces(country.cities, COUNTRY_EXTRA_CITIES[code], COUNTRY_PLACES[code]);
+}
+
+export function placesForContinent(continentId) {
+  const id = CONTINENTS[continentId] ? continentId : "europe";
+  const countryLists = Object.entries(COUNTRIES)
+    .filter(([, c]) => c.continent === id)
+    .map(([code]) => placesForCountry(code));
+  return mergePlaces(...countryLists, CONTINENT_PLACES[id]);
+}
+
+export function placesForWorld() {
+  return mergePlaces(
+    ...Object.keys(COUNTRIES).map(placesForCountry),
+    ...Object.values(CONTINENT_PLACES),
+    WORLD_PLACES,
+  );
+}
+
+export function placesForScope(scope) {
+  const current = getRegionPack();
+  if (scope === "pl") return placesForCountry(current.countryCode);
+  if (scope === "eu") return placesForContinent(current.continentId);
+  return placesForWorld();
 }
 
 function makePack(countryCode) {
@@ -535,11 +586,11 @@ export function regionPayload() {
 }
 
 export function pickCountryStart() {
-  return pickCity(pack.country.cities);
+  return pickCity(placesForCountry(pack.countryCode));
 }
 
 export function pickContinentStart() {
-  return pickCity(pack.continent.cities);
+  return pickCity(placesForContinent(pack.continentId));
 }
 
 export function guessHoldAlt(scope) {

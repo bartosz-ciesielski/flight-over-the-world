@@ -7,7 +7,7 @@ import {
   MathUtils,
 } from "three";
 import { asset } from "./asset.js";
-import { CONTINENTS, getRegionPack, pickContinentStart, pickCountryStart } from "./regions.js";
+import { getRegionPack, pickContinentStart, pickCountryStart, placesForScope } from "./regions.js";
 
 const R_EARTH = 6378137;
 
@@ -164,70 +164,6 @@ export function randomPointInEurope(geo) {
     if (pointInPoland(lon, lat, geo)) return { lat, lon }; // ten sam test punkt-w-poligonie
   }
   return { lat: 52.1, lon: 19.4 };
-}
-
-const GUESS_SPAWNS = {
-  pl: [
-    [52.23, 21.01], [50.06, 19.94], [54.35, 18.65], [51.11, 17.04], [52.41, 16.93],
-    [51.25, 22.57], [53.13, 23.16], [53.43, 14.55], [50.26, 19.02], [51.76, 19.46],
-    [50.04, 22.00], [53.78, 20.48], [53.12, 18.01], [50.87, 20.63], [49.30, 19.95],
-    [54.44, 18.56], [51.40, 21.15], [50.68, 17.93], [53.78, 15.78], [52.74, 15.23],
-  ],
-  eu: [
-    [48.86, 2.35], [52.52, 13.40], [41.90, 12.50], [40.42, -3.70], [38.72, -9.14],
-    [52.37, 4.90], [50.08, 14.44], [48.21, 16.37], [47.50, 19.04], [37.98, 23.73],
-    [59.33, 18.07], [59.91, 10.75], [60.17, 24.94], [53.35, -6.26], [55.95, -3.19],
-    [41.39, 2.17], [45.46, 9.19], [48.14, 11.58], [55.68, 12.57], [50.85, 4.35],
-  ],
-};
-
-const LANDMARKS = {
-  pl: [
-    [49.30, 19.95], [52.70, 23.87], [49.15, 22.55], [54.75, 17.55],
-    [49.42, 20.96], [53.80, 21.58], [50.86, 15.71], [54.18, 16.17],
-  ],
-  eu: [
-    [46.69, 7.86], [62.10, 7.21], [44.87, 15.62], [46.37, 14.11],
-    [36.39, 25.46], [40.63, 14.60], [44.13, 9.70], [48.64, -1.51],
-    [55.24, -6.51], [56.68, -5.10], [47.56, 10.75], [42.47, 18.53],
-    [50.86, 14.28], [46.85, 9.84], [64.15, -21.94], [44.43, 26.10],
-  ],
-  world: [
-    [36.06, -112.14], [37.75, -119.60], [44.46, -110.83], [37.30, -113.05],
-    [36.99, -110.09], [43.08, -79.07], [51.18, -115.57], [51.42, -116.48],
-    [-25.69, -54.44], [-25.34, 131.04], [-13.16, -72.54], [30.32, 35.44],
-    [20.91, 107.18], [29.32, 110.43], [-2.33, 34.83], [-17.92, 25.86],
-    [-33.96, 18.40], [-22.95, -43.21], [21.31, -157.86], [43.88, -103.46],
-  ],
-};
-
-function mergePlaces(...lists) {
-  const out = [];
-  const seen = new Set();
-  for (const list of lists) {
-    for (const p of list || []) {
-      const key = `${Number(p[0]).toFixed(2)},${Number(p[1]).toFixed(2)}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push(p);
-    }
-  }
-  return out;
-}
-
-function placesForScope(scope) {
-  const pack = getRegionPack();
-  if (scope === "pl") {
-    const extra = pack.countryCode === "PL" ? LANDMARKS.pl : [];
-    return mergePlaces(pack.country.cities, extra, GUESS_SPAWNS.pl);
-  }
-  if (scope === "eu") {
-    const cities = pack.continent?.cities || GUESS_SPAWNS.eu;
-    const extra = pack.continentId === "europe" || !pack.continentId ? LANDMARKS.eu : [];
-    return mergePlaces(cities, extra, GUESS_SPAWNS.eu);
-  }
-  const worldCities = Object.values(CONTINENTS).flatMap((c) => c.cities || []);
-  return mergePlaces(worldCities, LANDMARKS.world, GUESS_SPAWNS.eu);
 }
 
 function jitterStart({ lat, lon }, meters = 2200) {
