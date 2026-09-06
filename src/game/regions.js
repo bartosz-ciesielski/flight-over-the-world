@@ -543,9 +543,12 @@ export function pickContinentStart() {
 }
 
 export function guessHoldAlt(scope) {
-  if (scope !== "pl") return 9500;
-  const [lon0, lat0, lon1, lat1] = pack.country.bbox;
-  return Math.hypot(lon1 - lon0, lat1 - lat0) > 25 ? 7000 : 3000;
+  // Cities and parks sit well below this; snap then drops to ~350 m AGL.
+  if (scope === "pl") {
+    const [lon0, lat0, lon1, lat1] = pack.country.bbox;
+    return Math.hypot(lon1 - lon0, lat1 - lat0) > 25 ? 5200 : 2800;
+  }
+  return 5200;
 }
 
 detectLocale();

@@ -166,15 +166,13 @@ export class PlaneController {
   }
 
   update(dt, ctrl) {
-    // ctrl: roll -1..1, pitch -1..1, throttle -1..1 tylko dopóki klawisz wciśnięty
     const targetRoll = -ctrl.roll * 0.9;
     const targetPitch = ctrl.pitch * 0.4;
     this.roll += (targetRoll - this.roll) * Math.min(1, 6 * dt);
     this.pitch += (targetPitch - this.pitch) * Math.min(1, 4 * dt);
 
-    const hold = ctrl.throttle > 0 ? 1 : ctrl.throttle < 0 ? 0 : this.cruiseT;
-    const rate = ctrl.throttle !== 0 ? 0.55 : 1.7;
-    this.throttle += (hold - this.throttle) * Math.min(1, rate * dt);
+    const lever = Number.isFinite(ctrl.throttle) ? MathUtils.clamp(ctrl.throttle, 0, 1) : this.cruiseT;
+    this.throttle += (lever - this.throttle) * Math.min(1, 3.4 * dt);
     const span = this.boost - this.brake;
     const throttleSpeed = this.brake + this.throttle * span;
     // nos w dół = ujemny pitch: więcej i szybciej prędkości niż przy wznoszeniu
@@ -184,7 +182,6 @@ export class PlaneController {
     this.speed += (slopeTarget - this.speed) * Math.min(1, settle * dt);
     this.speed = Math.max(this.brake * 0.55, Math.min(this.boost * 1.18, this.speed));
 
-    // zakręt przez przechylenie
     this.heading += -Math.sin(this.roll) * (this.speed / 55) * dt * 0.85;
 
     // przeciągnięcie przy małej prędkości

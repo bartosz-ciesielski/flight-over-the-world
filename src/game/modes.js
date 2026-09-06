@@ -7,7 +7,7 @@ import {
   MathUtils,
 } from "three";
 import { asset } from "./asset.js";
-import { getRegionPack, pickContinentStart, pickCountryStart } from "./regions.js";
+import { CONTINENTS, getRegionPack, pickContinentStart, pickCountryStart } from "./regions.js";
 
 const R_EARTH = 6378137;
 
@@ -179,13 +179,62 @@ const GUESS_SPAWNS = {
     [59.33, 18.07], [59.91, 10.75], [60.17, 24.94], [53.35, -6.26], [55.95, -3.19],
     [41.39, 2.17], [45.46, 9.19], [48.14, 11.58], [55.68, 12.57], [50.85, 4.35],
   ],
+};
+
+const LANDMARKS = {
+  pl: [
+    [49.30, 19.95], [52.70, 23.87], [49.15, 22.55], [54.75, 17.55],
+    [49.42, 20.96], [53.80, 21.58], [50.86, 15.71], [54.18, 16.17],
+  ],
+  eu: [
+    [46.69, 7.86], [62.10, 7.21], [44.87, 15.62], [46.37, 14.11],
+    [36.39, 25.46], [40.63, 14.60], [44.13, 9.70], [48.64, -1.51],
+    [55.24, -6.51], [56.68, -5.10], [47.56, 10.75], [42.47, 18.53],
+    [50.86, 14.28], [46.85, 9.84], [64.15, -21.94], [44.43, 26.10],
+  ],
   world: [
-    [40.71, -74.01], [34.05, -118.24], [35.68, 139.69], [33.87, 151.21], [-22.91, -43.17],
-    [-33.92, 18.42], [30.04, 31.24], [25.20, 55.27], [1.35, 103.82], [19.08, 72.88],
-    [39.90, 116.41], [19.43, -99.13], [43.65, -79.38], [-34.60, -58.38], [-1.29, 36.82],
-    [41.01, 28.98], [13.76, 100.50], [37.57, 126.98], [49.28, -123.12], [-36.85, 174.76],
+    [36.06, -112.14], [37.75, -119.60], [44.46, -110.83], [37.30, -113.05],
+    [36.99, -110.09], [43.08, -79.07], [51.18, -115.57], [51.42, -116.48],
+    [-25.69, -54.44], [-25.34, 131.04], [-13.16, -72.54], [30.32, 35.44],
+    [20.91, 107.18], [29.32, 110.43], [-2.33, 34.83], [-17.92, 25.86],
+    [-33.96, 18.40], [-22.95, -43.21], [21.31, -157.86], [43.88, -103.46],
   ],
 };
+
+function mergePlaces(...lists) {
+  const out = [];
+  const seen = new Set();
+  for (const list of lists) {
+    for (const p of list || []) {
+      const key = `${Number(p[0]).toFixed(2)},${Number(p[1]).toFixed(2)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(p);
+    }
+  }
+  return out;
+}
+
+function placesForScope(scope) {
+  const pack = getRegionPack();
+  if (scope === "pl") {
+    const extra = pack.countryCode === "PL" ? LANDMARKS.pl : [];
+    return mergePlaces(pack.country.cities, extra, GUESS_SPAWNS.pl);
+  }
+  if (scope === "eu") {
+    const cities = pack.continent?.cities || GUESS_SPAWNS.eu;
+    const extra = pack.continentId === "europe" || !pack.continentId ? LANDMARKS.eu : [];
+    return mergePlaces(cities, extra, GUESS_SPAWNS.eu);
+  }
+  const worldCities = Object.values(CONTINENTS).flatMap((c) => c.cities || []);
+  return mergePlaces(worldCities, LANDMARKS.world, GUESS_SPAWNS.eu);
+}
+
+function jitterStart({ lat, lon }, meters = 2200) {
+  const brg = Math.random() * Math.PI * 2;
+  const d = 350 + Math.random() * meters;
+  return offsetPoint(lat, lon, d / 1000);
+}
 
 export function randomPointInBBox(bbox, landGeo) {
   const [lon0, lat0, lon1, lat1] = bbox;
@@ -200,25 +249,21 @@ export function randomPointInBBox(bbox, landGeo) {
 function cityFallback(scope) {
   if (scope === "pl") return pickCountryStart();
   if (scope === "eu") return pickContinentStart();
-  const list = GUESS_SPAWNS.world;
+  const list = placesForScope("world");
   const [lat, lon] = list[Math.floor(Math.random() * list.length)];
   return { lat, lon };
 }
 
+function pickListedStart(scope) {
+  const list = placesForScope(scope);
+  if (!list.length) return cityFallback(scope);
+  const [lat, lon] = list[Math.floor(Math.random() * list.length)];
+  return jitterStart({ lat, lon });
+}
+
 async function pickGuessStartOnce(scope) {
   try {
-    const pack = getRegionPack();
-    if (scope === "pl") {
-      const geo = await loadCountryGeo();
-      if (pack.countryCode === "PL") return randomPointInPoland(geo);
-      return randomPointInBBox(pack.country.bbox, geo);
-    }
-    if (scope === "eu") {
-      const geo = await loadContinentGeo();
-      if (pack.continentId === "europe") return randomPointInEurope(geo);
-      return randomPointInBBox(pack.continent.bbox, geo);
-    }
-    return randomPointInWorld(await loadWorldGeo());
+    return pickListedStart(scope);
   } catch {
     return cityFallback(scope);
   }

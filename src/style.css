@@ -800,8 +800,8 @@ kbd {
 }
 
 .lobby-link-row {
+  position: relative;
   display: flex;
-  gap: 10px;
   margin-bottom: 12px;
 }
 
@@ -809,7 +809,8 @@ kbd {
 
 #lobby-link {
   flex: 1;
-  padding: 12px 14px;
+  width: 100%;
+  padding: 12px 44px 12px 14px;
   background: rgba(243, 234, 214, 0.07);
   border: 1px solid rgba(243, 234, 214, 0.2);
   border-radius: 6px;
@@ -819,7 +820,40 @@ kbd {
   outline: none;
 }
 
-#lobby-copy,
+#lobby-copy {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  transform: translateY(-50%);
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+#lobby-copy svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+#lobby-copy .copied-ic { display: none; }
+
+#lobby-copy.copied {
+  color: var(--gold);
+}
+
+#lobby-copy.copied .copy-ic { display: none; }
+#lobby-copy.copied .copied-ic { display: block; }
+
+#lobby-copy:hover { color: var(--paper); background: rgba(243, 234, 214, 0.08); }
+
 #lobby-start {
   padding: 12px 20px;
   background: var(--gold);
@@ -839,7 +873,6 @@ kbd {
   font-size: 16px;
 }
 
-#lobby-copy:hover,
 #lobby-start:hover { filter: brightness(1.1); }
 
 #lobby-start:disabled { opacity: 0.55; cursor: wait; }
@@ -1435,6 +1468,63 @@ kbd {
   pointer-events: none;
 }
 
+#throttle {
+  pointer-events: none;
+  position: fixed;
+  right: max(22px, env(safe-area-inset-right));
+  bottom: 196px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+#throttle.hidden { display: none; }
+
+#throttle > span {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+}
+
+#throttle-rail {
+  pointer-events: auto;
+  position: relative;
+  width: 22px;
+  height: 148px;
+  border-radius: 999px;
+  background: rgba(18, 14, 10, 0.55);
+  border: 1px solid rgba(243, 234, 214, 0.22);
+  touch-action: none;
+  cursor: ns-resize;
+}
+
+#throttle-rail::before {
+  content: "";
+  position: absolute;
+  left: 7px;
+  right: 7px;
+  top: 10px;
+  bottom: 10px;
+  border-radius: 999px;
+  background: rgba(243, 234, 214, 0.12);
+}
+
+#throttle-knob {
+  position: absolute;
+  left: 50%;
+  bottom: 40%;
+  width: 28px;
+  height: 18px;
+  margin: 0 0 -9px -14px;
+  border-radius: 5px;
+  background: var(--gold);
+  border: 1px solid rgba(243, 234, 214, 0.4);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
 .touch-btns {
   pointer-events: auto;
   position: absolute;
@@ -1562,6 +1652,15 @@ kbd {
   #touch.show { display: block; }
   .mp-online-hint { display: none; }
 
+  #throttle {
+    right: max(18px, env(safe-area-inset-right));
+    bottom: max(118px, calc(env(safe-area-inset-bottom) + 102px));
+  }
+
+  #throttle-rail {
+    height: 132px;
+  }
+
   #mp-online {
     top: max(64px, calc(env(safe-area-inset-top) + 52px));
     right: 12px;
@@ -1671,8 +1770,7 @@ kbd {
     padding: 0;
   }
 
-  #start-btn,
-  #lobby-copy {
+  #start-btn {
     width: 100%;
   }
 

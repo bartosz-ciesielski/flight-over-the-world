@@ -7,12 +7,9 @@ const COOL_MS = 90 * 1000;
 
 /** Always-on photorealistic budget. Do not lower these when a key is throttled. */
 export const TILE_QUALITY = {
-  errorTarget: 6,
-  errorFalloff: 0,
-  errorFalloffDensity: 1e-4,
-  maxJobs: 16,
-  cacheTiles: 4000,
-  cacheBytes: 2e9,
+  errorTarget: 10,
+  cacheTiles: 3000,
+  cacheBytes: 1.5e9,
 };
 
 function splitKeys(raw) {
@@ -377,20 +374,15 @@ export function syncTileAuth(tiles, pool) {
 export function applyTileQuality(tiles, mobile = false) {
   if (!tiles) return;
   tiles.errorTarget = TILE_QUALITY.errorTarget;
-  tiles.errorFalloff = TILE_QUALITY.errorFalloff;
-  tiles.errorFalloffDensity = TILE_QUALITY.errorFalloffDensity;
-  tiles.loadAncestors = true;
   tiles.loadSiblings = !mobile;
-  tiles.downloadQueue.maxJobsPerOrigin = mobile ? 8 : TILE_QUALITY.maxJobs;
-  const maxTiles = mobile ? 900 : TILE_QUALITY.cacheTiles;
-  const maxBytes = mobile ? 4.5e8 : TILE_QUALITY.cacheBytes;
-  tiles.lruCache.maxSize = maxTiles;
-  tiles.lruCache.maxBytesSize = maxBytes;
+  if (tiles.parseQueue) tiles.parseQueue.maxJobs = 6;
+  tiles.lruCache.maxSize = mobile ? 1600 : TILE_QUALITY.cacheTiles;
+  tiles.lruCache.maxBytesSize = mobile ? 2.8e8 : TILE_QUALITY.cacheBytes;
   // min must stay below max — if they match, the cache fills and
   // refuses new tiles (blurry green after a teleport / new round)
-  tiles.lruCache.minSize = mobile ? 180 : 800;
-  tiles.lruCache.minBytesSize = mobile ? 2e8 : 8e8;
-  tiles.lruCache.unloadPercent = mobile ? 0.2 : 0.08;
+  tiles.lruCache.minSize = mobile ? 600 : 2000;
+  tiles.lruCache.minBytesSize = mobile ? 1.5e8 : 6e8;
+  tiles.lruCache.unloadPercent = 0.1;
 }
 
 /** Drop cached tiles so a long teleport can download the new place. */

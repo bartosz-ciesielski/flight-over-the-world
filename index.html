@@ -87,7 +87,15 @@
         <div id="lobby-players" class="lobby-players"></div>
         <div class="lobby-link-row">
           <input id="lobby-link" type="text" readonly />
-          <button id="lobby-copy" type="button">Copy link</button>
+          <button id="lobby-copy" type="button" aria-label="Copy link" title="Copy link">
+            <svg class="copy-ic" viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="9" y="9" width="11" height="13" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/>
+              <path d="M6 16V5.5A1.5 1.5 0 0 1 7.5 4H16" fill="none" stroke="currentColor" stroke-width="1.8"/>
+            </svg>
+            <svg class="copied-ic" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 13.2 9.4 17.5 19 7.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
         </div>
         <p id="lobby-status"></p>
         <button id="lobby-start" type="button">Start match</button>
@@ -132,8 +140,8 @@
           <button id="start-btn" type="button">Start</button>
         </div>
         <p id="menu-error"></p>
-          <p class="hint hint-desk"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> fly · hold <kbd>Shift</kbd> / <kbd>Ctrl</kbd> or tap <kbd>F</kbd> / <kbd>C</kbd> to lock speed · <kbd>M</kbd> map · <kbd>Esc</kbd> pause</p>
-          <p class="hint hint-touch">Drag the stick to fly · tap Faster / Slower to lock · Map shows where you are</p>
+          <p class="hint hint-desk"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> fly · drag the throttle or hold <kbd>Shift</kbd> / <kbd>Ctrl</kbd> · <kbd>F</kbd> / <kbd>C</kbd> full / idle · <kbd>M</kbd> map · <kbd>Esc</kbd> pause</p>
+          <p class="hint hint-touch">Drag the stick to fly · slide the throttle on the right · Map shows where you are</p>
       </div>
     </div>
 
@@ -243,9 +251,14 @@
       </div>
       <div class="touch-btns">
         <button id="touch-map" type="button">Map</button>
-        <button id="touch-boost" type="button">Faster</button>
-        <button id="touch-brake" type="button">Slower</button>
         <button id="touch-talk" type="button">Talk</button>
+      </div>
+    </div>
+
+    <div id="throttle" class="hidden">
+      <span>THR</span>
+      <div id="throttle-rail" role="slider" aria-label="Throttle" aria-valuemin="0" aria-valuemax="100" aria-valuenow="40" aria-orientation="vertical" tabindex="0">
+        <i id="throttle-knob"></i>
       </div>
     </div>
 

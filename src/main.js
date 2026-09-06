@@ -6,6 +6,7 @@ import {
 import {
   TilesFadePlugin,
   UpdateOnChangePlugin,
+  UnloadTilesPlugin,
   TileCompressionPlugin,
   GLTFExtensionsPlugin,
   GoogleCloudAuthPlugin,
@@ -59,7 +60,6 @@ import {
   applyTileQuality,
   flushTilesForWarp,
 } from "./game/tileAuth.js";
-import { createHoldParentTilesPlugin } from "./game/holdParentTiles.js";
 import { createFreeMap, createMiniMap, paintTrailMap } from "./game/freeMap.js";
 
 // rakieta stoi pionowo (+Y) — połóż ją nosem do przodu (-Z, konwencja lotu)
@@ -209,31 +209,19 @@ const HOME_CAPTURE_M = 600;
 const HOME_BEACON_M = 1000;
 
 let camera, scene, renderer, tiles, sun, sky;
-let tileHoldUntil = 0;
 let tile429Count = 0;
 let lastFailedRetryAt = 0;
 let lastTileErr = "";
 let pendingFailedRetry = false;
 
 function onTileThrottle(status = 429) {
-  if (!tiles) return;
   tile429Count += 1;
   lastTileErr = String(status);
   pendingFailedRetry = true;
-  tileHoldUntil = 0;
-  applyTileQuality(tiles, isMobile);
-}
-
-function releaseTileHold() {
-  if (!tiles || !tileHoldUntil) return;
-  if (performance.now() < tileHoldUntil) return;
-  tileHoldUntil = 0;
-  applyTileQuality(tiles, isMobile);
-  retryFailedTiles(true);
 }
 
 function retryFailedTiles(force = false) {
-  if (!tiles || tileHoldUntil) return;
+  if (!tiles) return;
   const failed = tiles.stats?.failed || 0;
   if (!failed || (!force && !pendingFailedRetry)) return;
   const now = performance.now();
@@ -268,6 +256,7 @@ function updateTilesSafe() {
 }
 let planeMesh, plane, beacon;
 let groundAlt = TERRAIN_ALT;
+let lastSafeAgl = 200;
 let crashed = false;
 let finished = false;
 let loaderDismissed = false;
@@ -558,7 +547,8 @@ const mp = {
 };
 if (import.meta.env.DEV) window.__foeMp = mp;
 
-const ctrl = { roll: 0, pitch: 0, throttle: 0 };
+const ctrl = { roll: 0, pitch: 0, throttle: 0.4 };
+let throttleLever = 0.4;
 const keys = new Set();
 const raycaster = new Raycaster();
 raycaster.firstHitOnly = true;
@@ -645,6 +635,9 @@ const el = {
   stickKnob: document.getElementById("stick-knob"),
   touchBoost: document.getElementById("touch-boost"),
   touchBrake: document.getElementById("touch-brake"),
+  throttle: document.getElementById("throttle"),
+  throttleRail: document.getElementById("throttle-rail"),
+  throttleKnob: document.getElementById("throttle-knob"),
   touchTalk: document.getElementById("touch-talk"),
   touchMap: document.getElementById("touch-map"),
   freemap: document.getElementById("freemap"),
@@ -2365,17 +2358,8 @@ async function init() {
     compressIndex: true,
   }));
   tiles.registerPlugin(new UpdateOnChangePlugin());
-  const holdParents = createHoldParentTilesPlugin();
-  tiles.registerPlugin(holdParents);
-  tiles.userData = tiles.userData || {};
-  tiles.userData.holdParents = holdParents;
-  // Fade only after HoldParentTiles says the child mesh exists, so the
-  // swap is a crossfade instead of a pop or a hole to the sky.
-  tiles.registerPlugin(new TilesFadePlugin({
-    fadeDuration: 280,
-    fadeRootTiles: false,
-    maximumFadeOutTiles: 50,
-  }));
+  tiles.registerPlugin(new UnloadTilesPlugin());
+  tiles.registerPlugin(new TilesFadePlugin());
   const draco = new DRACOLoader();
   draco.setDecoderPath("https://www.gstatic.com/draco/versioned/decoders/1.5.7/");
   tiles.registerPlugin(new GLTFExtensionsPlugin({ dracoLoader: draco }));
@@ -2588,11 +2572,15 @@ function resetFlight(latDeg, lonDeg) {
   crashed = false;
   crashStreak = 0;
   crashGraceUntil = 0;
+  lastSafeAgl = 200;
   groundSamples.length = 0;
   finished = false;
   shake = 0;
   ctrl.roll = 0;
   ctrl.pitch = 0;
+  throttleLever = plane.cruiseT;
+  ctrl.throttle = throttleLever;
+  syncThrottleUi();
   camInit = false;
   if (planeMesh) planeMesh.visible = true;
   homePath.length = 0;
@@ -2679,9 +2667,14 @@ function adoptGround(gh) {
     groundSamples.length = 0;
     return;
   }
+  const floor = groundSamples.length ? Math.min(...groundSamples) : gh;
+  // LOD parent / roof pops the mesh up — that is not the street
+  if (gh > floor + 24) {
+    armCrashGrace(900);
+    return;
+  }
   groundSamples.push(gh);
-  if (groundSamples.length > 5) groundSamples.shift();
-  // drzewo / dach / gruby LOD są wyżej — prawdziwy grunt to najniższy pomiar
+  if (groundSamples.length > 8) groundSamples.shift();
   groundAlt = Math.min(...groundSamples);
 }
 
@@ -2690,17 +2683,15 @@ function armCrashGrace(ms = 2500) {
   crashStreak = 0;
 }
 
-// czy punkt w świecie (np. końcówka skrzydła) jest w/bardzo blisko terenu
 const _rayOrigin = new Vector3();
 const _rayDown = new Vector3();
 function hitTerrainAt(worldPos, margin) {
-  _rayDown.copy(worldPos).normalize().negate(); // radialnie w dół
+  _rayDown.copy(worldPos).normalize().negate();
   _rayOrigin.copy(worldPos).addScaledVector(_rayDown, -600);
   raycaster.set(_rayOrigin, _rayDown);
   raycaster.far = 1200;
   const hits = raycaster.intersectObject(tiles.group, true);
   if (!hits.length) return false;
-  // AGL punktu = dystans promienia - 600; kraksa gdy punkt jest <= margin nad terenem
   return hits[0].distance - 600 < margin;
 }
 
@@ -2967,8 +2958,14 @@ el.lobbyCopy.addEventListener("click", async () => {
   if (!link) return;
   try {
     await navigator.clipboard.writeText(link);
-    el.lobbyCopy.textContent = "Copied";
-    setTimeout(() => { el.lobbyCopy.textContent = "Copy link"; }, 1600);
+    el.lobbyCopy.classList.add("copied");
+    el.lobbyCopy.setAttribute("aria-label", "Copied");
+    el.lobbyCopy.title = "Copied";
+    setTimeout(() => {
+      el.lobbyCopy.classList.remove("copied");
+      el.lobbyCopy.setAttribute("aria-label", "Copy link");
+      el.lobbyCopy.title = "Copy link";
+    }, 1600);
   } catch {
     el.lobbyLink.select();
   }
@@ -3410,12 +3407,12 @@ window.addEventListener("keydown", (e) => {
   if (!e.repeat && !menuOpen && !paused && !guessOpen) {
     if (k === "f") {
       e.preventDefault();
-      setSpeedLatch("boost");
+      setThrottleLever(1);
       return;
     }
     if (k === "c") {
       e.preventDefault();
-      setSpeedLatch("brake");
+      setThrottleLever(0);
       return;
     }
   }
@@ -3436,25 +3433,30 @@ el.mpOnline?.addEventListener("click", () => {
 });
 window.addEventListener("blur", () => stopTalk());
 
-const touch = { roll: 0, pitch: 0, boost: false, brake: false, pid: null };
+const touch = { roll: 0, pitch: 0, boost: false, brake: false, pid: null, thr: null };
 
-function syncSpeedButtons() {
-  el.touchBoost?.classList.toggle("held", touch.boost);
-  el.touchBrake?.classList.toggle("held", touch.brake);
+function setThrottleLever(v) {
+  throttleLever = Math.max(0, Math.min(1, v));
+  syncThrottleUi();
 }
 
-function setSpeedLatch(which) {
-  if (which === "boost") {
-    touch.boost = !touch.boost;
-    if (touch.boost) touch.brake = false;
-  } else if (which === "brake") {
-    touch.brake = !touch.brake;
-    if (touch.brake) touch.boost = false;
-  } else {
-    touch.boost = false;
-    touch.brake = false;
+function syncThrottleUi() {
+  if (el.throttleKnob) {
+    el.throttleKnob.style.bottom = `${throttleLever * 100}%`;
   }
-  syncSpeedButtons();
+  el.throttleRail?.setAttribute("aria-valuenow", String(Math.round(throttleLever * 100)));
+}
+
+function syncThrottleVis() {
+  const show = !menuOpen && !paused && !leaveOpen && !guessOpen && !crashed && !finished;
+  el.throttle?.classList.toggle("hidden", !show);
+}
+
+function throttleFromClientY(clientY) {
+  if (!el.throttleRail) return throttleLever;
+  const r = el.throttleRail.getBoundingClientRect();
+  if (r.height < 1) return throttleLever;
+  return (r.bottom - clientY) / r.height;
 }
 
 function resetStick() {
@@ -3503,14 +3505,6 @@ function bindHold(btn, down, up) {
   btn.addEventListener("pointercancel", end);
 }
 
-function bindLatch(btn, which) {
-  if (!btn) return;
-  btn.addEventListener("pointerdown", (e) => {
-    e.preventDefault();
-    setSpeedLatch(which);
-  });
-}
-
 if (el.stick) {
   el.stick.addEventListener("pointerdown", (e) => {
     e.preventDefault();
@@ -3529,12 +3523,35 @@ if (el.stick) {
   el.stick.addEventListener("pointerup", endStick);
   el.stick.addEventListener("pointercancel", endStick);
 }
-bindLatch(el.touchBoost, "boost");
-bindLatch(el.touchBrake, "brake");
 bindHold(el.touchTalk, () => startTalk(), () => stopTalk());
 el.touchPause?.addEventListener("click", () => setPaused(true));
 el.touchMap?.addEventListener("click", () => toggleFreeMap());
 el.stick?.addEventListener("touchmove", (e) => e.preventDefault(), { passive: false });
+
+if (el.throttleRail) {
+  const startThr = (e) => {
+    e.preventDefault();
+    touch.thr = e.pointerId;
+    el.throttleRail.setPointerCapture(e.pointerId);
+    setThrottleLever(throttleFromClientY(e.clientY));
+  };
+  const moveThr = (e) => {
+    if (touch.thr !== e.pointerId) return;
+    setThrottleLever(throttleFromClientY(e.clientY));
+  };
+  const endThr = (e) => {
+    if (touch.thr != null && e.pointerId !== touch.thr) return;
+    touch.thr = null;
+  };
+  el.throttleRail.addEventListener("pointerdown", startThr);
+  el.throttleRail.addEventListener("pointermove", moveThr);
+  el.throttleRail.addEventListener("pointerup", endThr);
+  el.throttleRail.addEventListener("pointercancel", endThr);
+  el.throttleRail.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    setThrottleLever(throttleLever + (e.deltaY < 0 ? 0.06 : -0.06));
+  }, { passive: false });
+}
 
 function syncTouchUi() {
   if (!el.touch) return;
@@ -3543,10 +3560,8 @@ function syncTouchUi() {
   el.touch.classList.toggle("show", show);
   el.touch.classList.toggle("talk", voiceEnabled());
   el.touch.classList.toggle("free", mode === "free");
-  if (!show) {
-    resetStick();
-    setSpeedLatch(null);
-  }
+  syncThrottleVis();
+  if (!show) resetStick();
 }
 
 async function restartMode() {
@@ -3583,6 +3598,28 @@ const offset = new Vector3();
 const camFramePos = new Vector3();
 const camFrameQuat = new Quaternion();
 const camFrameScale = new Vector3();
+window.__foeDebug = () => ({
+  state: "dbg",
+  lat: plane?.latDeg,
+  lon: plane?.lonDeg,
+  h: plane?.height,
+  speed: plane?.speed,
+  menuOpen,
+  awaitingSnap,
+  guessOpen,
+  paused,
+  crashed,
+  finished,
+  tilesLoaded: tiles?.stats?.loaded || 0,
+  tilesLoading: tiles?.stats?.loading || 0,
+  tilesQueue: tiles?.stats?.inQueue || 0,
+  tilesFailed: tiles?.stats?.failed || 0,
+  tilesParsed: tiles?.stats?.parsed || 0,
+  tileKey: tilePool?.current?.kind || "none",
+  tileSlot: tilePool?.current?.slot || -1,
+  tileMaxed: tile429Count,
+  camPos: camera?.position?.toArray?.() || [],
+});
 const skyQuat = new Quaternion(); // lokalna ramka N/S (bez kursu) — dla kopuły nieba i słońca
 const skyFramePos = new Vector3();
 const skyFrameScale = new Vector3();
@@ -3644,7 +3681,11 @@ function tickFrame() {
   const pitchIn = keyPitch || touch.pitch;
   ctrl.roll += (rollIn - ctrl.roll) * Math.min(1, 6 * dt);
   ctrl.pitch += (pitchIn - ctrl.pitch) * Math.min(1, 6 * dt);
-  ctrl.throttle = touch.boost || keys.has("shift") ? 1 : touch.brake || keys.has("control") ? -1 : 0;
+  if (flying) {
+    if (keys.has("shift")) setThrottleLever(throttleLever + dt * 0.55);
+    else if (keys.has("control")) setThrottleLever(throttleLever - dt * 0.55);
+  }
+  ctrl.throttle = throttleLever;
 
   if (flying) {
     // równe kroki — duży dt przy ładowaniu kafelków nie robi „przeskoku” przy nitro
@@ -3832,17 +3873,21 @@ function tickFrame() {
     awaitingSnap = false;
     pendingSnap = false;
     armCrashGrace();
-    if (snapLastGh !== null) plane.height = snapLastGh + snapAgl();
+    const gh = Number.isFinite(snapLastGh) ? snapLastGh : TERRAIN_ALT;
+    plane.height = gh + snapAgl();
+    groundAlt = gh;
     if (mp.active && mp.inRound) reportSnapped();
     else finishSnapStart();
   }
   const agl = plane.height - groundAlt;
-  // bez kolizji podczas dosadzania i chwilę po nim — LOD/rodzic potrafi
-  // podnieść "grunt" o dziesiątki metrów i udawać uderzenie
+  if (agl > 22) lastSafeAgl = agl;
+  if (lastSafeAgl > 28 && lastSafeAgl - agl > 22) {
+    armCrashGrace(1400);
+  }
   const canCrash = flying && !pendingSnap && performance.now() > crashGraceUntil;
   const hitGround = canCrash && agl < 4;
-  const hitWing = canCrash && agl < 45 && wingHit();
-  if (hitGround || hitWing) crashStreak += 1;
+  const hitBuilding = canCrash && wingHit();
+  if (hitGround || hitBuilding) crashStreak += 1;
   else crashStreak = 0;
   if (crashStreak >= 3) crash();
 
@@ -3932,7 +3977,6 @@ function tickFrame() {
       tiles.setResolutionFromRenderer(camera, renderer);
       tiles.setCamera(camera);
       camera.updateMatrixWorld();
-      releaseTileHold();
       retryFailedTiles();
       updateTilesSafe();
     }
@@ -3942,7 +3986,6 @@ function tickFrame() {
     tiles.setResolutionFromRenderer(camera, renderer);
     tiles.setCamera(camera);
     camera.updateMatrixWorld();
-    releaseTileHold();
     retryFailedTiles();
     updateTilesSafe();
   }
@@ -3977,14 +4020,12 @@ function tickFrame() {
     tileDown: tiles.stats?.downloading ?? -1,
     tileLoaded: tiles.stats?.loaded ?? -1,
     tile429: tile429Count,
-    tileHoldMs: tileHoldUntil ? Math.max(0, Math.round(tileHoldUntil - performance.now())) : 0,
     tileJobs: tiles.downloadQueue?.maxJobsPerOrigin ?? -1,
     tileErr: lastTileErr,
     memJs: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : -1,
     memTex: renderer.info?.memory?.textures ?? -1,
     memGeo: renderer.info?.memory?.geometries ?? -1,
     memCache: tiles.lruCache ? Math.round((tiles.lruCache.cachedBytes || 0) / 1048576) : -1,
-    tileHeld: tiles.userData?.holdParents?.held?.size ?? 0,
     tilePool: tilePool.debug(),
     explosions: explosions.length,
     crashed,
