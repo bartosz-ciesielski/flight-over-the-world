@@ -7,9 +7,9 @@ const COOL_MS = 90 * 1000;
 
 /** Always-on photorealistic budget. Do not lower these when a key is throttled. */
 export const TILE_QUALITY = {
-  errorTarget: 10,
-  cacheTiles: 3000,
-  cacheBytes: 1.5e9,
+  errorTarget: 6,
+  cacheTiles: 5000,
+  cacheBytes: 2e9,
 };
 
 function splitKeys(raw) {
@@ -331,7 +331,12 @@ export class TileKeyPool {
       } catch (err) {
         last = new Response("", { status: 599, statusText: String(err?.message || err) });
       }
-      if (last.ok) return last;
+      if (last.ok) {
+        // success clears the throttle history so one good streak never
+        // escalates into the 15-minute cooldown
+        if (this.current) this.current.fails = 0;
+        return last;
+      }
       if (last.status === 429 || last.status === 502 || last.status === 503) {
         this.lastErr = String(last.status);
         await new Promise((r) => setTimeout(r, 250 * (attempt + 1)));
@@ -373,15 +378,15 @@ export function syncTileAuth(tiles, pool) {
 
 export function applyTileQuality(tiles, mobile = false) {
   if (!tiles) return;
-  tiles.errorTarget = TILE_QUALITY.errorTarget;
+  tiles.errorTarget = mobile ? 10 : TILE_QUALITY.errorTarget;
   tiles.loadSiblings = !mobile;
   if (tiles.parseQueue) tiles.parseQueue.maxJobs = 6;
   tiles.lruCache.maxSize = mobile ? 1600 : TILE_QUALITY.cacheTiles;
   tiles.lruCache.maxBytesSize = mobile ? 2.8e8 : TILE_QUALITY.cacheBytes;
   // min must stay below max — if they match, the cache fills and
   // refuses new tiles (blurry green after a teleport / new round)
-  tiles.lruCache.minSize = mobile ? 600 : 2000;
-  tiles.lruCache.minBytesSize = mobile ? 1.5e8 : 6e8;
+  tiles.lruCache.minSize = mobile ? 600 : 3000;
+  tiles.lruCache.minBytesSize = mobile ? 1.5e8 : 8e8;
   tiles.lruCache.unloadPercent = 0.1;
 }
 
