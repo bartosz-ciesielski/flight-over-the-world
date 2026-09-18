@@ -7,7 +7,7 @@ const DEAD_MS = 24 * 60 * 60 * 1000;
 const COOL_MS = 90 * 1000;
 
 /** Shared Cesium ion quota is exhausted — public tiles stay off until this is false. */
-export const PUBLIC_MAP_LOCKED = true;
+export const PUBLIC_MAP_LOCKED = false;
 
 export function getUserIonKey() {
   try {
