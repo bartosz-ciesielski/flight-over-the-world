@@ -718,6 +718,16 @@ kbd {
 
 .music-btn:hover { color: var(--paper); }
 
+.legal-links {
+  margin: 14px 0 0;
+  text-align: center;
+  font-size: 13px;
+}
+
+.legal-links a { color: var(--muted); }
+
+.legal-links a:hover { color: var(--gold); }
+
 .pause-card .music-btn {
   margin-top: 4px;
 }

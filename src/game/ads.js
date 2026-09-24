@@ -1,5 +1,5 @@
 const CLIENT = String(import.meta.env.VITE_ADSENSE_CLIENT || "ca-pub-6302166317257778").trim();
-const SLOT = String(import.meta.env.VITE_ADSENSE_SLOT || "").trim();
+const SLOT = String(import.meta.env.VITE_ADSENSE_SLOT || "8908893780").trim();
 
 export function adsEnabled() {
   return /^ca-pub-\d+$/.test(CLIENT) && /^\d+$/.test(SLOT);
