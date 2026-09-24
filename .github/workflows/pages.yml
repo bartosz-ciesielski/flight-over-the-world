@@ -27,6 +27,8 @@ jobs:
           VITE_CESIUM_ION_KEYS: ${{ secrets.VITE_CESIUM_ION_KEYS }}
           VITE_GOOGLE_MAPS_KEY: ${{ secrets.VITE_GOOGLE_MAPS_KEY }}
           VITE_GOOGLE_TILES_KEYS: ${{ secrets.VITE_GOOGLE_TILES_KEYS }}
+          VITE_ADSENSE_CLIENT: ${{ secrets.VITE_ADSENSE_CLIENT }}
+          VITE_ADSENSE_SLOT: ${{ secrets.VITE_ADSENSE_SLOT }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

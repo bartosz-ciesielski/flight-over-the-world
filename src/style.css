@@ -486,6 +486,27 @@ kbd {
 
 #f-banner .gm-actions { margin-top: 18px; }
 
+.end-ad {
+  display: flex;
+  justify-content: center;
+  margin: 16px auto 0;
+  min-height: 250px;
+}
+
+.end-ad[hidden] { display: none; }
+
+.ad-placeholder {
+  width: 300px;
+  height: 250px;
+  display: grid;
+  place-items: center;
+  background: rgba(243, 234, 214, 0.06);
+  border: 1px dashed rgba(243, 234, 214, 0.22);
+  color: var(--muted);
+  font-size: 13px;
+  letter-spacing: 0.04em;
+}
+
 #f-banner.trail {
   top: 50%;
   width: min(680px, 92vw);

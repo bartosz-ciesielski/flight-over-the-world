@@ -62,6 +62,7 @@ import {
   getUserIonKey,
   setUserIonKey,
 } from "./game/tileAuth.js";
+import { showEndAd, hideEndAd } from "./game/ads.js";
 import { createHoldParentTilesPlugin } from "./game/holdParentTiles.js";
 import { createFreeMap, createMiniMap, paintTrailMap } from "./game/freeMap.js";
 
@@ -560,6 +561,8 @@ const el = {
   banner: document.getElementById("f-banner"),
   bannerRetry: document.getElementById("banner-retry"),
   bannerMenu: document.getElementById("banner-menu"),
+  endAd: document.getElementById("end-ad"),
+  gmAd: document.getElementById("gm-ad"),
   homeTrail: document.getElementById("home-trail"),
   menu: document.getElementById("menu"),
   city: document.getElementById("city-input"),
@@ -3271,6 +3274,7 @@ function openGuessMap() {
   updateGuessScores();
   el.gmClose.style.display = "none";
   el.gmRetry.style.display = "none";
+  hideEndAd(el.gmAd);
   el.gmClose.textContent = mp.active ? "Back to room" : "Back to menu";
   el.gmRetry.textContent = mp.active ? "Another round" : "Try again";
   if (mp.active) {
@@ -3428,9 +3432,11 @@ el.gmCanvas.addEventListener("click", (e) => {
   el.gmResult.textContent = `Off by ${Math.round(errKm)} km`;
   el.gmClose.style.display = "";
   el.gmRetry.style.display = "";
+  showEndAd(el.gmAd);
 });
 
 el.gmClose.addEventListener("click", () => {
+  hideEndAd(el.gmAd);
   el.guessmap.classList.remove("show");
   if (mp.active) backToLobby();
   else backToMenu();
@@ -3456,6 +3462,7 @@ el.gmRetry.addEventListener("click", () => {
   el.gmResult.textContent = "Picking a new point…";
   el.gmRetry.style.display = "none";
   el.gmClose.style.display = "none";
+  hideEndAd(el.gmAd);
   restartMode();
 });
 
@@ -4264,6 +4271,7 @@ function showBanner(title, sub = "") {
     el.banner.classList.remove("trail");
   }
   el.banner.classList.add("show");
+  showEndAd(el.endAd);
 }
 
 function hideBanner() {
@@ -4271,4 +4279,5 @@ function hideBanner() {
     el.banner.classList.remove("show", "trail");
   }
   if (el.homeTrail) el.homeTrail.hidden = true;
+  hideEndAd(el.endAd);
 }
