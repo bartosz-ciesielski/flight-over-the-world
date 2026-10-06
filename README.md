@@ -2,7 +2,7 @@
 
 Fly over photorealistic Earth – guess the region, find your way home, or just explore. Single player and multiplayer.
 
-**Play:** https://flightoverearth.com
+**Play:** https://flightoverearth.com — the public Cesium ion quota is used up, so the hosted site needs your own [Cesium ion](https://ion.cesium.com/) token (paste it on the start screen, or put it in `.env` locally).
 
 ![Flight over Paris](docs/screens/00-paryz.png)
 
